@@ -420,6 +420,16 @@ def main():
             label_list.sort()  # Let's sort it for determinism
             num_labels = len(label_list)
 
+    if training_args.bf16: 
+        model_load_dtype = torch.bfloat16 
+    elif training_args.fp16: 
+        model_load_dtype = torch.float16 
+    else: 
+        model_load_dtype = torch.float32
+    
+
+
+
     # Load pretrained model and tokenizer
     #
     # In distributed training, the .from_pretrained methods guarantee that only one local process can concurrently
@@ -450,6 +460,7 @@ def main():
             token=model_args.token,
             trust_remote_code=model_args.trust_remote_code,
             ignore_mismatched_sizes=model_args.ignore_mismatched_sizes,
+            torch_dtype=model_load_dtype, 
         )
     else:
         model = AutoModelForSequenceClassification.from_pretrained(
