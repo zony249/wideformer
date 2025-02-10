@@ -574,9 +574,9 @@ def main():
         asst = tokenizer.decode(151645) + tokenizer.decode(151648)
 
         if sentence2_key is not None and len(task_to_prompt[data_args.task_name]) == 2: 
-            examples[sentence2_key] = [ex + asst + task_to_prompt[data_args.task_name][1] + labels[i] for i, ex in enumerate(examples[sentence2_key])]
+            examples[sentence2_key] = [ex + asst + task_to_prompt[data_args.task_name][1] for i, ex in enumerate(examples[sentence2_key])]
         elif len(task_to_prompt[data_args.task_name]) == 2: 
-            examples[sentence1_key] = [ex + asst + task_to_prompt[data_args.task_name][1] + labels[i] for i, ex in enumerate(examples[sentence1_key])]
+            examples[sentence1_key] = [ex + asst + task_to_prompt[data_args.task_name][1] for i, ex in enumerate(examples[sentence1_key])]
         else: 
             examples[sentence1_key] = [ex + asst + labels[i] for i, ex in enumerate(examples[sentence1_key])]
 
@@ -584,6 +584,8 @@ def main():
             (examples[sentence1_key],) if sentence2_key is None else (examples[sentence1_key], examples[sentence2_key])
         )
         result = tokenizer(*args, padding=padding, max_length=max_seq_length, truncation=True)
+
+        print(result[0].tokens)
 
         # Map labels to IDs (not necessary for GLUE tasks)
         if label_to_id is not None and "label" in examples:
@@ -597,29 +599,29 @@ def main():
             load_from_cache_file=not data_args.overwrite_cache,
             desc="Running tokenizer on dataset",
         )
-    if training_args.do_train:
-        if "train" not in raw_datasets:
-            raise ValueError("--do_train requires a train dataset")
-        train_dataset = raw_datasets["train"]
-        if data_args.max_train_samples is not None:
-            max_train_samples = min(len(train_dataset), data_args.max_train_samples)
-            train_dataset = train_dataset.select(range(max_train_samples))
+    # if training_args.do_train:
+    #     if "train" not in raw_datasets:
+    #         raise ValueError("--do_train requires a train dataset")
+    #     train_dataset = raw_datasets["train"]
+    #     if data_args.max_train_samples is not None:
+    #         max_train_samples = min(len(train_dataset), data_args.max_train_samples)
+    #         train_dataset = train_dataset.select(range(max_train_samples))
 
-    if training_args.do_eval:
-        if "validation" not in raw_datasets and "validation_matched" not in raw_datasets:
-            raise ValueError("--do_eval requires a validation dataset")
-        eval_dataset = raw_datasets["validation_matched" if data_args.task_name == "mnli" else "validation"]
-        if data_args.max_eval_samples is not None:
-            max_eval_samples = min(len(eval_dataset), data_args.max_eval_samples)
-            eval_dataset = eval_dataset.select(range(max_eval_samples))
+    # if training_args.do_eval:
+    #     if "validation" not in raw_datasets and "validation_matched" not in raw_datasets:
+    #         raise ValueError("--do_eval requires a validation dataset")
+    #     eval_dataset = raw_datasets["validation_matched" if data_args.task_name == "mnli" else "validation"]
+    #     if data_args.max_eval_samples is not None:
+    #         max_eval_samples = min(len(eval_dataset), data_args.max_eval_samples)
+    #         eval_dataset = eval_dataset.select(range(max_eval_samples))
 
-    if training_args.do_predict or data_args.task_name is not None or data_args.test_file is not None:
-        if "test" not in raw_datasets and "test_matched" not in raw_datasets:
-            raise ValueError("--do_predict requires a test dataset")
-        predict_dataset = raw_datasets["test_matched" if data_args.task_name == "mnli" else "test"]
-        if data_args.max_predict_samples is not None:
-            max_predict_samples = min(len(predict_dataset), data_args.max_predict_samples)
-            predict_dataset = predict_dataset.select(range(max_predict_samples))
+    # if training_args.do_predict or data_args.task_name is not None or data_args.test_file is not None:
+    if "test" not in raw_datasets and "test_matched" not in raw_datasets:
+        raise ValueError("--do_predict requires a test dataset")
+    predict_dataset = raw_datasets["test_matched" if data_args.task_name == "mnli" else "test"]
+    if data_args.max_predict_samples is not None:
+        max_predict_samples = min(len(predict_dataset), data_args.max_predict_samples)
+        predict_dataset = predict_dataset.select(range(max_predict_samples))
 
     # Log a few random samples from the training set:
     if training_args.do_train:
@@ -666,85 +668,85 @@ def main():
         data_collator=data_collator,
     )
 
-    # Training
-    if training_args.do_train:
-        checkpoint = None
-        if training_args.resume_from_checkpoint is not None:
-            checkpoint = training_args.resume_from_checkpoint
-        elif last_checkpoint is not None:
-            checkpoint = last_checkpoint
-        train_result = trainer.train(resume_from_checkpoint=checkpoint)
-        metrics = train_result.metrics
-        max_train_samples = (
-            data_args.max_train_samples if data_args.max_train_samples is not None else len(train_dataset)
-        )
-        metrics["train_samples"] = min(max_train_samples, len(train_dataset))
+    # # Training
+    # if training_args.do_train:
+    #     checkpoint = None
+    #     if training_args.resume_from_checkpoint is not None:
+    #         checkpoint = training_args.resume_from_checkpoint
+    #     elif last_checkpoint is not None:
+    #         checkpoint = last_checkpoint
+    #     train_result = trainer.train(resume_from_checkpoint=checkpoint)
+    #     metrics = train_result.metrics
+    #     max_train_samples = (
+    #         data_args.max_train_samples if data_args.max_train_samples is not None else len(train_dataset)
+    #     )
+    #     metrics["train_samples"] = min(max_train_samples, len(train_dataset))
 
-        trainer.save_model()  # Saves the tokenizer too for easy upload
+    #     trainer.save_model()  # Saves the tokenizer too for easy upload
 
-        trainer.log_metrics("train", metrics)
-        trainer.save_metrics("train", metrics)
-        trainer.save_state()
+    #     trainer.log_metrics("train", metrics)
+    #     trainer.save_metrics("train", metrics)
+    #     trainer.save_state()
 
-    # Evaluation
-    if training_args.do_eval:
-        logger.info("*** Evaluate ***")
+    # # Evaluation
+    # if training_args.do_eval:
+    #     logger.info("*** Evaluate ***")
 
-        # Loop to handle MNLI double evaluation (matched, mis-matched)
-        tasks = [data_args.task_name]
-        eval_datasets = [eval_dataset]
-        if data_args.task_name == "mnli":
-            tasks.append("mnli-mm")
-            valid_mm_dataset = raw_datasets["validation_mismatched"]
-            if data_args.max_eval_samples is not None:
-                max_eval_samples = min(len(valid_mm_dataset), data_args.max_eval_samples)
-                valid_mm_dataset = valid_mm_dataset.select(range(max_eval_samples))
-            eval_datasets.append(valid_mm_dataset)
-            combined = {}
+    #     # Loop to handle MNLI double evaluation (matched, mis-matched)
+    #     tasks = [data_args.task_name]
+    #     eval_datasets = [eval_dataset]
+    #     if data_args.task_name == "mnli":
+    #         tasks.append("mnli-mm")
+    #         valid_mm_dataset = raw_datasets["validation_mismatched"]
+    #         if data_args.max_eval_samples is not None:
+    #             max_eval_samples = min(len(valid_mm_dataset), data_args.max_eval_samples)
+    #             valid_mm_dataset = valid_mm_dataset.select(range(max_eval_samples))
+    #         eval_datasets.append(valid_mm_dataset)
+    #         combined = {}
 
-        for eval_dataset, task in zip(eval_datasets, tasks):
-            metrics = trainer.evaluate(eval_dataset=eval_dataset)
+    #     for eval_dataset, task in zip(eval_datasets, tasks):
+    #         metrics = trainer.evaluate(eval_dataset=eval_dataset)
 
-            max_eval_samples = (
-                data_args.max_eval_samples if data_args.max_eval_samples is not None else len(eval_dataset)
-            )
-            metrics["eval_samples"] = min(max_eval_samples, len(eval_dataset))
+    #         max_eval_samples = (
+    #             data_args.max_eval_samples if data_args.max_eval_samples is not None else len(eval_dataset)
+    #         )
+    #         metrics["eval_samples"] = min(max_eval_samples, len(eval_dataset))
 
-            if task == "mnli-mm":
-                metrics = {k + "_mm": v for k, v in metrics.items()}
-            if task is not None and "mnli" in task:
-                combined.update(metrics)
+    #         if task == "mnli-mm":
+    #             metrics = {k + "_mm": v for k, v in metrics.items()}
+    #         if task is not None and "mnli" in task:
+    #             combined.update(metrics)
 
-            trainer.log_metrics("eval", metrics)
-            trainer.save_metrics("eval", combined if task is not None and "mnli" in task else metrics)
+    #         trainer.log_metrics("eval", metrics)
+    #         trainer.save_metrics("eval", combined if task is not None and "mnli" in task else metrics)
 
-    if training_args.do_predict:
-        logger.info("*** Predict ***")
+    # if training_args.do_predict:
+    logger.info("*** Predict ***")
 
-        # Loop to handle MNLI double evaluation (matched, mis-matched)
-        tasks = [data_args.task_name]
-        predict_datasets = [predict_dataset]
-        if data_args.task_name == "mnli":
-            tasks.append("mnli-mm")
-            predict_datasets.append(raw_datasets["test_mismatched"])
+    # Loop to handle MNLI double evaluation (matched, mis-matched)
+    tasks = [data_args.task_name]
+    predict_datasets = [predict_dataset]
+    if data_args.task_name == "mnli":
+        tasks.append("mnli-mm")
+        predict_datasets.append(raw_datasets["test_mismatched"])
 
-        for predict_dataset, task in zip(predict_datasets, tasks):
-            # Removing the `label` columns because it contains -1 and Trainer won't like that.
-            predict_dataset = predict_dataset.remove_columns("label")
-            predictions = trainer.predict(predict_dataset, metric_key_prefix="predict").predictions
-            predictions = np.squeeze(predictions) if is_regression else np.argmax(predictions, axis=1)
+    for predict_dataset, task in zip(predict_datasets, tasks):
+        # Removing the `label` columns because it contains -1 and Trainer won't like that.
+        predict_dataset = predict_dataset.remove_columns("label")
+        predictions = trainer.predict(predict_dataset, metric_key_prefix="predict").predictions
+        predictions = np.squeeze(predictions) if is_regression else np.argmax(predictions, axis=1)
 
-            output_predict_file = os.path.join(training_args.output_dir, f"predict_results_{task}.txt")
-            if trainer.is_world_process_zero():
-                with open(output_predict_file, "w") as writer:
-                    logger.info(f"***** Predict results {task} *****")
-                    writer.write("index\tprediction\n")
-                    for index, item in enumerate(predictions):
-                        if is_regression:
-                            writer.write(f"{index}\t{item:3.3f}\n")
-                        else:
-                            item = label_list[item]
-                            writer.write(f"{index}\t{item}\n")
+        output_predict_file = os.path.join(training_args.output_dir, f"predict_results_{task}.txt")
+        if trainer.is_world_process_zero():
+            with open(output_predict_file, "w") as writer:
+                logger.info(f"***** Predict results {task} *****")
+                writer.write("index\tprediction\n")
+                for index, item in enumerate(predictions):
+                    if is_regression:
+                        writer.write(f"{index}\t{item:3.3f}\n")
+                    else:
+                        item = label_list[item]
+                        writer.write(f"{index}\t{item}\n")
 
     kwargs = {"finetuned_from": model_args.model_name_or_path, "tasks": "text-classification"}
     if data_args.task_name is not None:

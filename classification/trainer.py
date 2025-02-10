@@ -50,6 +50,7 @@ import huggingface_hub.utils as hf_hub_utils
 import numpy as np
 import torch
 import torch.distributed as dist
+import torch.nn.functional as F
 from huggingface_hub import ModelCard, create_repo, upload_folder
 from packaging import version
 from torch import nn
@@ -329,6 +330,29 @@ class PrefixCollator:
     def __call__(self, batch): 
         data = self.data_collator(batch)
         return data
+
+
+def preds_to_output(preds, tok, look_for: Dict[str, int]): 
+    """
+    Converts decoded predictions (from generative model) into classification result.
+    Works by counting occurrances of target words.
+    """
+    preds_tok = tok.batch_decode(preds) 
+    output = []
+    for sent in preds_tok: 
+        counts = {k:0 for k in look_for} 
+        for item in look_for: 
+            counts[item] = sent.count(item) 
+        max_key = max(counts, key=counts.get)
+        output.append(look_for[max_key])
+    output = torch.tensor(output, device=preds.device)
+    output = F.one_hot(output, num_classes=len(look_for))
+    return {"loss": 0, "logits": output}
+
+        
+
+
+
 
 
 
@@ -3707,6 +3731,21 @@ class Trainer:
             loss_mb = smp_forward_backward(model, inputs, self.args.gradient_accumulation_steps)
             return loss_mb.reduce_mean().detach().to(self.args.device)
 
+
+
+
+        #set labels as input. shifting should be done automatically. 
+        unwrapped_model = self.accelerator.unwrap_model(model)
+        if _is_peft_model(unwrapped_model):
+            model_name = unwrapped_model.base_model.model._get_name()
+        else:
+            model_name = unwrapped_model._get_name()
+        # User-defined compute_loss function
+        if model_name in MODEL_FOR_CAUSAL_LM_MAPPING_NAMES.values():
+            inputs["labels"] = inputs["input_ids"]
+
+
+
         with self.compute_loss_context_manager():
             loss = self.compute_loss(model, inputs, num_items_in_batch=num_items_in_batch)
 
@@ -4494,6 +4533,19 @@ class Trainer:
         else:
             labels = None
 
+
+
+        unwrapped_model = self.accelerator.unwrap_model(model)
+        if _is_peft_model(unwrapped_model):
+            model_name = unwrapped_model.base_model.model._get_name()
+        else:
+            model_name = unwrapped_model._get_name()
+        # User-defined compute_loss function
+
+
+
+
+
         with torch.no_grad():
             if is_sagemaker_mp_enabled():
                 raw_outputs = smp_forward_only(model, inputs)
@@ -4516,9 +4568,15 @@ class Trainer:
                     logits = smp_nested_concat(logits_mb)
             else:
                 if has_labels or loss_without_labels:
-                    with self.compute_loss_context_manager():
-                        loss, outputs = self.compute_loss(model, inputs, return_outputs=True)
-                    loss = loss.mean().detach()
+                    if model_name in MODEL_FOR_CAUSAL_LM_MAPPING_NAMES.values():
+                        predictions = model.generate(**inputs, pad_token_id=model.config.eos_token_id)
+                        outputs = preds_to_output(predictions, self.processing_class, look_for=self.model.config.label2id)
+                        loss = None
+                    else: 
+                        with self.compute_loss_context_manager():
+                            loss, outputs = self.compute_loss(model, inputs, return_outputs=True)
+                        loss = loss.mean().detach()
+
 
                     if isinstance(outputs, dict):
                         logits = tuple(v for k, v in outputs.items() if k not in ignore_keys + ["loss"])
@@ -4528,6 +4586,8 @@ class Trainer:
                     loss = None
                     with self.compute_loss_context_manager():
                         outputs = model(**inputs)
+                        # TODO: use model generate, write decoding function to obtain label. 
+
                     if isinstance(outputs, dict):
                         logits = tuple(v for k, v in outputs.items() if k not in ignore_keys)
                     else:
