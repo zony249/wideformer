@@ -9,8 +9,9 @@ export OUTPUT=runs/$EXP_NAME
 mkdir $OUTPUT
 
 
-python -m debugpy --listen 0.0.0.0:5678 finetune.py \
+python3 -m debugpy --listen 0.0.0.0:5678 finetune.py \
   --model_name_or_path $MODEL \
+  --is_causal \
   --lora_adapter random_init \
   --task_name $TASK_NAME \
   --cache_dir=glue \

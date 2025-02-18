@@ -89,10 +89,12 @@ task_to_keys = {
 }
 
 system_prompt = "A conversation between User and Assistant. The user asks a question, and the Assistant solves it. The assistant first thinks about the reasoning process in the mind and then provides the user with the answer. The reasoning process and answer are enclosed within <think> </think> and <answer> </answer> tags, respectively, i.e., <think> reasoning process here </think> <answer> answer here </answer>."
-
-
+special_tokens = {
+    "user": 151644, 
+    "assistant": 151645
+}
 task_to_prompt = {
-    "mnli": ("The relationship between a pair of sentences can be 'entailment', 'neutral', or 'contradiction'. For these two sentences: ", " What is the relationship?")
+    "mnli": (" Explain in one word whether the following pair of sentences exhibit logical \"entailment\", \"neutral\", or \"contradiction\": ", " The relationship is:")
 }
 
 logger = logging.getLogger(__name__)
@@ -565,13 +567,38 @@ def main():
         return result
 
     id2label = model.config.id2label
-    def preprocess_function_for_causal_model(examples):
+    def preprocess_function_for_causal_eval(examples):
         # Tokenize the texts
-        user = tokenizer.decode(151644)
+        user = tokenizer.decode(special_tokens["user"])
         examples[sentence1_key] = [system_prompt + user + task_to_prompt[data_args.task_name][0] + tokenizer.bos_token + ex for i, ex in enumerate(examples[sentence1_key])]
         labels = [id2label[x] + "." if x >= 0  else "" for x in examples["label"]] 
         
-        asst = tokenizer.decode(151645) + tokenizer.decode(151648)
+        asst = tokenizer.decode(special_tokens["assistant"])
+
+        if sentence2_key is not None and len(task_to_prompt[data_args.task_name]) == 2: 
+            examples[sentence2_key] = [ex + asst + task_to_prompt[data_args.task_name][1] + labels[i] for i, ex in enumerate(examples[sentence2_key])]
+        elif len(task_to_prompt[data_args.task_name]) == 2: 
+            examples[sentence1_key] = [ex + asst + task_to_prompt[data_args.task_name][1] + labels[i] for i, ex in enumerate(examples[sentence1_key])]
+        else: 
+            examples[sentence1_key] = [ex + asst + labels[i] for i, ex in enumerate(examples[sentence1_key])]
+
+        args = (
+            (examples[sentence1_key],) if sentence2_key is None else (examples[sentence1_key], examples[sentence2_key])
+        )
+        result = tokenizer(*args, padding=padding, max_length=max_seq_length, truncation=True)
+
+        # Map labels to IDs (not necessary for GLUE tasks)
+        if label_to_id is not None and "label" in examples:
+            result["label"] = [(label_to_id[l] if l != -1 else -1) for l in examples["label"]]
+        return result
+
+    def preprocess_function_for_causal_training(examples):
+        # Tokenize the texts
+        user = tokenizer.decode(special_tokens["user"])
+        examples[sentence1_key] = [system_prompt + user + task_to_prompt[data_args.task_name][0] + tokenizer.bos_token + ex for i, ex in enumerate(examples[sentence1_key])]
+        labels = [id2label[x] + "." if x >= 0  else "" for x in examples["label"]] 
+        
+        asst = tokenizer.decode(special_tokens["assistant"])
 
         if sentence2_key is not None and len(task_to_prompt[data_args.task_name]) == 2: 
             examples[sentence2_key] = [ex + asst + task_to_prompt[data_args.task_name][1] + labels[i] for i, ex in enumerate(examples[sentence2_key])]
@@ -592,7 +619,7 @@ def main():
 
     with training_args.main_process_first(desc="dataset map pre-processing"):
         raw_datasets = raw_datasets.map(
-            preprocess_function if not model_args.is_causal else preprocess_function_for_causal_model,
+            preprocess_function if not model_args.is_causal else preprocess_function_for_causal_training,
             batched=True,
             load_from_cache_file=not data_args.overwrite_cache,
             desc="Running tokenizer on dataset",
