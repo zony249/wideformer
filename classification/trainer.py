@@ -342,7 +342,9 @@ def preds_to_output(preds, tok, look_for: Dict[str, int]):
     for sent in preds_tok: 
         counts = {k:0 for k in look_for} 
         for item in look_for: 
-            counts[item] = sent.count(item) 
+            counts[item] = sent.split("\n")[-1].count(item) 
+            # print(sent)
+            # print(sent.split("\n")[-1])
         max_key = max(counts, key=counts.get)
         output.append(look_for[max_key])
     output = torch.tensor(output, device=preds.device)
@@ -3742,7 +3744,7 @@ class Trainer:
             model_name = unwrapped_model._get_name()
         # User-defined compute_loss function
         if model_name in MODEL_FOR_CAUSAL_LM_MAPPING_NAMES.values():
-            inputs["labels"] = inputs["input_ids"]
+            inputs["labels"] = inputs["input_ids"]#torch.cat([inputs["input_ids"][:, :-1], torch.ones_like(inputs["input_ids"][:, 0:1]) * self.processing_class.eos_token_id], axis=-1)
 
 
 
@@ -4569,7 +4571,7 @@ class Trainer:
             else:
                 if has_labels or loss_without_labels:
                     if model_name in MODEL_FOR_CAUSAL_LM_MAPPING_NAMES.values():
-                        predictions = model.generate(**inputs, pad_token_id=model.config.eos_token_id)
+                        predictions = model.generate(**inputs, pad_token_id=model.config.eos_token_id, max_length=4096)
                         outputs = preds_to_output(predictions, self.processing_class, look_for=self.model.config.label2id)
                         loss = None
                     else: 

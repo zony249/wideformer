@@ -10,13 +10,14 @@ export OUTPUT=runs/$EXP_NAME
 mkdir $OUTPUT
 
 
-python -m debugpy --listen 0.0.0.0:5678 predict.py \
+python -m debugpy --listen 0.0.0.0:5678 finetune.py \
   --model_name_or_path $MODEL \
   --is_causal \
   --task_name $TASK_NAME \
   --cache_dir=glue \
+  --do_eval \
   --do_predict \
-  --max_seq_length 144 \
+  --max_seq_length 192 \
   --learning_rate 3e-4 \
   --per_device_eval_batch_size 1 \
   --output_dir $OUTPUT \

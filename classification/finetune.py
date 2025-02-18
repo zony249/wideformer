@@ -42,6 +42,7 @@ from transformers import (
     default_data_collator,
     set_seed,
 )
+from modeling_qwen2 import Qwen2ForCausalLM
 from transformers.trainer_utils import get_last_checkpoint
 from transformers.utils import check_min_version, send_example_telemetry
 from transformers.utils.versions import require_version
@@ -94,7 +95,7 @@ special_tokens = {
     "assistant": 151645
 }
 task_to_prompt = {
-    "mnli": (" Explain in one word whether the following pair of sentences exhibit logical \"entailment\", \"neutral\", or \"contradiction\": ", " The relationship is:")
+    "mnli": (" Explain in one word whether the following pair of sentences exhibit logical \"entailment\", \"neutral\", or \"contradiction\": ", " The relationship is: ")
 }
 
 logger = logging.getLogger(__name__)
@@ -458,7 +459,7 @@ def main():
     )
 
     if model_args.is_causal: 
-        model = AutoModelForCausalLM.from_pretrained(
+        model = Qwen2ForCausalLM.from_pretrained(
             model_args.model_name_or_path,
             config=config,
             revision=model_args.model_revision,
@@ -570,17 +571,20 @@ def main():
     def preprocess_function_for_causal_eval(examples):
         # Tokenize the texts
         user = tokenizer.decode(special_tokens["user"])
-        examples[sentence1_key] = [system_prompt + user + task_to_prompt[data_args.task_name][0] + tokenizer.bos_token + ex for i, ex in enumerate(examples[sentence1_key])]
+        maybe_system_prompt = system_prompt if model_args.lora_adapter is None else ""
+        examples[sentence1_key] = [maybe_system_prompt + user + task_to_prompt[data_args.task_name][0] + tokenizer.bos_token + ex for i, ex in enumerate(examples[sentence1_key])]
         labels = [id2label[x] + "." if x >= 0  else "" for x in examples["label"]] 
         
         asst = tokenizer.decode(special_tokens["assistant"])
 
+        maybe_suffix = task_to_prompt[data_args.task_name][1] if len(task_to_prompt[data_args.task_name]) == 2 and model_args.lora_adapter is not None else "" 
+
         if sentence2_key is not None and len(task_to_prompt[data_args.task_name]) == 2: 
-            examples[sentence2_key] = [ex + asst + task_to_prompt[data_args.task_name][1] + labels[i] for i, ex in enumerate(examples[sentence2_key])]
+            examples[sentence2_key] = [ex + asst + maybe_suffix for i, ex in enumerate(examples[sentence2_key])]
         elif len(task_to_prompt[data_args.task_name]) == 2: 
-            examples[sentence1_key] = [ex + asst + task_to_prompt[data_args.task_name][1] + labels[i] for i, ex in enumerate(examples[sentence1_key])]
+            examples[sentence1_key] = [ex + asst + maybe_suffix for i, ex in enumerate(examples[sentence1_key])]
         else: 
-            examples[sentence1_key] = [ex + asst + labels[i] for i, ex in enumerate(examples[sentence1_key])]
+            examples[sentence1_key] = [ex + asst for i, ex in enumerate(examples[sentence1_key])]
 
         args = (
             (examples[sentence1_key],) if sentence2_key is None else (examples[sentence1_key], examples[sentence2_key])
@@ -595,7 +599,8 @@ def main():
     def preprocess_function_for_causal_training(examples):
         # Tokenize the texts
         user = tokenizer.decode(special_tokens["user"])
-        examples[sentence1_key] = [system_prompt + user + task_to_prompt[data_args.task_name][0] + tokenizer.bos_token + ex for i, ex in enumerate(examples[sentence1_key])]
+        maybe_system_prompt = system_prompt if model_args.lora_adapter is None else ""
+        examples[sentence1_key] = [maybe_system_prompt + user + task_to_prompt[data_args.task_name][0] + tokenizer.bos_token + ex for i, ex in enumerate(examples[sentence1_key])]
         labels = [id2label[x] + "." if x >= 0  else "" for x in examples["label"]] 
         
         asst = tokenizer.decode(special_tokens["assistant"])
@@ -618,12 +623,32 @@ def main():
         return result
 
     with training_args.main_process_first(desc="dataset map pre-processing"):
-        raw_datasets = raw_datasets.map(
+        # raw_datasets = raw_datasets.map(
+        #     preprocess_function if not model_args.is_causal else preprocess_function_for_causal_training,
+        #     batched=True,
+        #     load_from_cache_file=not data_args.overwrite_cache,
+        #     desc="Running tokenizer on dataset",
+        # )
+        raw_datasets["train"] = raw_datasets["train"].map(
             preprocess_function if not model_args.is_causal else preprocess_function_for_causal_training,
             batched=True,
             load_from_cache_file=not data_args.overwrite_cache,
             desc="Running tokenizer on dataset",
         )
+
+        if data_args.task_name == "mnli": 
+            val_names = ["validation_matched", "validation_mismatched", "test_matched", "test_mismatched"]
+        else: 
+            val_names = ["validation", "test"]
+
+        for v in val_names: 
+            raw_datasets[v] = raw_datasets[v].map(
+                preprocess_function if not model_args.is_causal else preprocess_function_for_causal_eval,
+                batched=True,
+                load_from_cache_file=not data_args.overwrite_cache,
+                desc="Running tokenizer on dataset",
+            )
+
     if training_args.do_train:
         if "train" not in raw_datasets:
             raise ValueError("--do_train requires a train dataset")
