@@ -8,6 +8,7 @@
 
 
 
+export CUDA_VISIBLE_DEVICES=6,7
 export MODEL="deepseek-ai/DeepSeek-R1-Distill-Qwen-7B"
 # export MODEL="roberta-large"
 export TASK_NAME=mnli
@@ -17,10 +18,8 @@ export OUTPUT=runs/$EXP_NAME
 mkdir $OUTPUT
 
 
-accelerate launch \
-  --multi_gpu \
-  --mixed_precision bf16 \
-  --use_deepspeed \
+torchrun \
+  --nproc_per_node=2 \
   finetune.py \
     --model_name_or_path $MODEL \
     --is_causal \

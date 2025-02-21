@@ -60,6 +60,7 @@ from peft import (
 
 from trainer import Trainer, PrefixCollator
 import torch
+from torch import multiprocessing 
 
 # Will error if the minimal version of Transformers is not installed. Remove at your own risks.
 # check_min_version("4.49.0.dev0")
@@ -67,12 +68,16 @@ import torch
 def print_trainable_parameters(model):
     trainable_params = 0
     all_param = 0
+    # if multiprocessing.parent_process() is None:
+    #     print("running in a parent process")
+    # else: 
+    #     print("running in a child process")
     for _, param in model.named_parameters():
         all_param += param.numel()
         if param.requires_grad:
             trainable_params += param.numel()
     print(
-        f"trainable params: {trainable_params} || all params: {all_param} || trainable%: {100 * trainable_params / all_param:.2f}"
+        f"trainable params: {trainable_params} || all params: {all_param} || trainable%: {100 * trainable_params/all_param:.2f}"
     )
 
 require_version("datasets>=1.8.0", "To fix: pip install -r examples/pytorch/text-classification/requirements.txt")

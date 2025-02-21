@@ -8,7 +8,7 @@
 #SBATCH --output=slurm-logs/slurm-%j-%n-causal-pretrained-prediction.out
 
 
-# export CUDA_VISIBLE_DEVICES=3
+export CUDA_VISIBLE_DEVICES=6,7
 export MODEL="deepseek-ai/DeepSeek-R1-Distill-Qwen-7B"
 # export MODEL="roberta-large"
 export TASK_NAME=mnli
@@ -18,19 +18,21 @@ export OUTPUT=runs/$EXP_NAME
 mkdir $OUTPUT
 
 
-python -m debugpy --listen 0.0.0.0:5678 finetune.py \
-  --model_name_or_path $MODEL \
-  --is_causal \
-  --task_name $TASK_NAME \
-  --cache_dir=glue \
-  --do_eval \
-  --do_predict \
-  --max_seq_length 192 \
-  --learning_rate 3e-4 \
-  --per_device_eval_batch_size 4 \
-  --output_dir $OUTPUT \
-  --bf16 \
-  --bf16_full_eval \
-  --optim adamw_hf \
-  --seed $((RANDOM % 100000)) \
-  --overwrite_cache \
+torchrun \
+  --nproc_per_node=2 \
+  finetune.py \
+    --model_name_or_path $MODEL \
+    --is_causal \
+    --task_name $TASK_NAME \
+    --cache_dir=glue \
+    --do_eval \
+    --do_predict \
+    --max_seq_length 192 \
+    --learning_rate 3e-4 \
+    --per_device_eval_batch_size 4 \
+    --output_dir $OUTPUT \
+    --bf16 \
+    --bf16_full_eval \
+    --optim adamw_hf \
+    --seed $((RANDOM % 100000)) \
+    --overwrite_cache \
