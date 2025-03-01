@@ -342,9 +342,11 @@ def preds_to_output(preds, tok, look_for: Dict[str, int]):
     for sent in preds_tok: 
         counts = {k:0 for k in look_for} 
         for item in look_for: 
-            counts[item] = sent.split("\n")[-1].count(item) 
-            # print(sent)
-            # print(sent.split("\n")[-1])
+            counts[item] = sent.split("\n")[-1].lower().count(item) 
+        # print(sent)
+        # print(sent.split("\n")[-1])
+        # print(counts)
+        # print(max(counts, key=counts.get))
         max_key = max(counts, key=counts.get)
         output.append(look_for[max_key])
     output = torch.tensor(output, device=preds.device)
@@ -4571,7 +4573,10 @@ class Trainer:
             else:
                 if has_labels or loss_without_labels:
                     if model_name in MODEL_FOR_CAUSAL_LM_MAPPING_NAMES.values():
-                        predictions = model.generate(**inputs, pad_token_id=model.config.eos_token_id, max_length=4096)
+                        predictions = model.generate(**inputs, 
+                                                     pad_token_id=model.config.eos_token_id, 
+                                                     num_beams=5, 
+                                                     max_new_tokens=1024)
                         outputs = preds_to_output(predictions, self.processing_class, look_for=self.model.config.label2id)
                         loss = None
                     else: 
