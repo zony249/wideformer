@@ -4590,13 +4590,21 @@ class Trainer:
                     else:
                         logits = outputs[1:]
                 else:
-                    loss = None
-                    with self.compute_loss_context_manager():
-                        outputs = model(**inputs)
+                    if model_name in MODEL_FOR_CAUSAL_LM_MAPPING_NAMES.values():
+                        predictions = model.generate(**inputs, 
+                                                     pad_token_id=model.config.eos_token_id, 
+                                                     num_beams=5, 
+                                                     max_new_tokens=1024)
+                        outputs = preds_to_output(predictions, self.processing_class, look_for=self.model.config.label2id)
+                        loss = None
+                    else: 
+                        loss = None
+                        with self.compute_loss_context_manager():
+                            outputs = model(**inputs)
                         # TODO: use model generate, write decoding function to obtain label. 
 
                     if isinstance(outputs, dict):
-                        logits = tuple(v for k, v in outputs.items() if k not in ignore_keys)
+                        logits = tuple(v for k, v in outputs.items() if k not in ignore_keys + ["loss"])
                     else:
                         logits = outputs
                     # TODO: this needs to be fixed and made cleaner later.
