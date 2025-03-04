@@ -14,17 +14,17 @@ export MODEL="deepseek-ai/DeepSeek-R1-Distill-Qwen-7B"
 # export MODEL="roberta-large"
 export TASK_NAME=mnli
 export EXP_NAME=$(date +%x--%T)--finetune
-export OUTPUT=$SCRATCH/wideformer/classification/runs/$EXP_NAME
+export OUTPUT=runs/$EXP_NAME
 
 
 mkdir -p $OUTPUT
 
 
 torchrun \
-  --nproc_per_node=4 \
+  --nproc_per_node=1 \
   finetune.py \
     --model_name_or_path $MODEL \
-    --is_causal \
+    --use_causal_lm \
     --lora_adapter random_init \
     --task_name $TASK_NAME \
     --cache_dir=glue_train \

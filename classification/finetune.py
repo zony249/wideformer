@@ -210,9 +210,9 @@ class ModelArguments:
     model_name_or_path: str = field(
         metadata={"help": "Path to pretrained model or model identifier from huggingface.co/models"}
     )
-    is_causal: bool = field(
+    use_causal_lm: bool = field(
         default=False, 
-        metadata={"help": "Whether the model is causal or non-causal"}
+        metadata={"help": "Whether to use CausalLM or SequenceClassification models"}
     )
     lora_adapter: Optional[str] = field(
         default=None, metadata={"help": 
@@ -472,7 +472,7 @@ def main():
         trust_remote_code=model_args.trust_remote_code,
     )
 
-    if model_args.is_causal: 
+    if model_args.use_causal_lm: 
         model = Qwen2ForCausalLM.from_pretrained(
             model_args.model_name_or_path,
             config=config,
@@ -504,8 +504,8 @@ def main():
                 init_lora_weights="gaussian", #"loftq", loftq_config=LoftQConfig(), 
                 lora_dropout=0.1, 
                 # target_modules=["query_proj", "key_proj"], 
-                task_type=TaskType.CAUSAL_LM if model_args.is_causal else TaskType.SEQ_CLS, 
-                modules_to_save= ["lm_head.weight"] if model_args.is_causal else ['classifier.bias', 'classifier.weight', 'pooler.dense.bias', 'pooler.dense.weight'],
+                task_type=TaskType.CAUSAL_LM if model_args.use_causal_lm else TaskType.SEQ_CLS, 
+                modules_to_save= ["lm_head.weight"] if model_args.use_causal_lm else ['classifier.bias', 'classifier.weight', 'pooler.dense.bias', 'pooler.dense.weight'],
             )
             model = get_peft_model(model, lora_config)
         else: 
@@ -644,7 +644,7 @@ def main():
         #     desc="Running tokenizer on dataset",
         # )
         raw_datasets["train"] = raw_datasets["train"].map(
-            preprocess_function if not model_args.is_causal else preprocess_function_for_causal_training,
+            preprocess_function if not model_args.use_causal_lm else preprocess_function_for_causal_training,
             batched=True,
             load_from_cache_file=not data_args.overwrite_cache,
             desc="Running tokenizer on dataset",
@@ -657,7 +657,7 @@ def main():
 
         for v in val_names: 
             raw_datasets[v] = raw_datasets[v].map(
-                preprocess_function if not model_args.is_causal else preprocess_function_for_causal_eval,
+                preprocess_function if not model_args.use_causal_lm else preprocess_function_for_causal_eval,
                 batched=True,
                 load_from_cache_file=not data_args.overwrite_cache,
                 desc="Running tokenizer on dataset",
