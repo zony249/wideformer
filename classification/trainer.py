@@ -4576,7 +4576,7 @@ class Trainer:
                         predictions = model.generate(**inputs, 
                                                      pad_token_id=model.config.eos_token_id, 
                                                      num_beams=5, 
-                                                     max_new_tokens=1024)
+                                                     max_new_tokens=self.args.max_new_tokens)
                         outputs = preds_to_output(predictions, self.processing_class, look_for=self.model.config.label2id)
                         loss = None
                     else: 
@@ -4594,7 +4594,7 @@ class Trainer:
                         predictions = model.generate(**inputs, 
                                                      pad_token_id=model.config.eos_token_id, 
                                                      num_beams=5, 
-                                                     max_new_tokens=1024)
+                                                     max_new_tokens=self.args.max_new_tokens)
                         outputs = preds_to_output(predictions, self.processing_class, look_for=self.model.config.label2id)
                         loss = None
                     else: 

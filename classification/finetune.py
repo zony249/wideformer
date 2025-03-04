@@ -100,7 +100,8 @@ special_tokens = {
     "assistant": 151645
 }
 task_to_prompt = {
-    "mnli": (" Explain in one word whether the following pair of sentences exhibit logical \"entailment\", \"neutral\", or \"contradiction\": ", " The relationship is: ")
+    "mnli": (" Explain in one word whether the following pair of sentences exhibit logical \"entailment\", \"neutral\", or \"contradiction\": ", "\nThe relationship is: "), 
+    "qqp" : (" Respond in one word whether the folling two questions are paraphrases of each other or not. If they paraphrase each other, then respond with \"duplicate\", and if they don't, respond with \"not_duplicate\".", "\nThe answer is: ")
 }
 
 logger = logging.getLogger(__name__)
@@ -265,13 +266,21 @@ class ModelArguments:
         metadata={"help": "Will enable to load a pretrained model whose head dimensions are different."},
     )
 
+@dataclass
+class CustomTrainingArguments(TrainingArguments): 
+    
+    max_new_tokens: Optional[int] = field(
+        default=1,
+        metadata={"help": "Under the causal generation setting, how many new tokens the model is allowed to generate."},
+    )
+
 
 def main():
     # See all possible arguments in src/transformers/training_args.py
     # or by passing the --help flag to this script.
     # We now keep distinct sets of args, for a cleaner separation of concerns.
 
-    parser = HfArgumentParser((ModelArguments, DataTrainingArguments, TrainingArguments))
+    parser = HfArgumentParser((ModelArguments, DataTrainingArguments, CustomTrainingArguments))
     if len(sys.argv) == 2 and sys.argv[1].endswith(".json"):
         # If we pass only one argument to the script and it's the path to a json file,
         # let's parse it to get our arguments.
