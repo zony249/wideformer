@@ -11,8 +11,8 @@
 # export CUDA_VISIBLE_DEVICES=6,7
 export MODEL="deepseek-ai/DeepSeek-R1-Distill-Qwen-7B"
 # export MODEL="roberta-large"
-export TASK_NAME=mnli
-export EXP_NAME=$(date +%x--%T)--predict
+export TASK_NAME=qqp
+export EXP_NAME=$(date +%y-%m-%d--%T)--generative-predict
 export OUTPUT=runs/$EXP_NAME
 
 
