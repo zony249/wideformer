@@ -9,7 +9,7 @@
 
 
 
-# export CUDA_VISIBLE_DEVICES=6,7
+export CUDA_VISIBLE_DEVICES=0,3
 export MODEL="deepseek-ai/DeepSeek-R1-Distill-Qwen-7B"
 # export MODEL="roberta-large"
 export TASK_NAME=mnli
@@ -21,7 +21,7 @@ mkdir -p $OUTPUT
 
 
 torchrun \
-  --nproc_per_node=1 \
+  --nproc_per_node=2 \
   finetune.py \
     --model_name_or_path $MODEL \
     --use_causal_lm \

@@ -8,12 +8,11 @@
 #SBATCH --output=slurm-logs/slurm-%j-%n-causal-pretrained-prediction.out
 
 
-export CUDA_VISIBLE_DEVICES=0,2,3,4
+# export CUDA_VISIBLE_DEVICES=6,7
 export MODEL="deepseek-ai/DeepSeek-R1-Distill-Qwen-7B"
 # export MODEL="roberta-large"
 export TASK_NAME=mnli
-export LORA_ADAPTER="models/mnli-teacher/best_tfmr"
-export EXP_NAME=$(date +%y-%m-%d--%T)--finetune-predict
+export EXP_NAME=$(date +%x--%T)--predict
 export OUTPUT=runs/$EXP_NAME
 
 
@@ -21,10 +20,10 @@ mkdir -p $OUTPUT
 
 
 torchrun \
-  --nproc_per_node=4 \
+  --nproc_per_node=1 \
   finetune.py \
     --model_name_or_path $MODEL \
-    --lora_adapter=$LORA_ADAPTER \
+    --use_causal_lm \
     --task_name $TASK_NAME \
     --cache_dir=glue_pretrained \
     --do_eval \
