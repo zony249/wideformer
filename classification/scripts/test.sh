@@ -20,6 +20,8 @@ export OUTPUT=runs/$EXP_NAME
 mkdir -p $OUTPUT
 
 
+export START=$(date +%s)
+
 torchrun \
   --nproc_per_node=4 \
   finetune.py \
@@ -67,3 +69,10 @@ if [[ $TASK_NAME == "mnli" ]]; then
    export TASK=MNLI-mm
    python convert_glue_preds.py --input_file $OUTPUT/predict_results_$TASK_NAME-mm.txt --task $TASK
 fi
+
+
+export END=$(date +%s)
+
+export RUNTIME=$(((END-START)/3600)) hrs
+echo Total runtime: $RUNTIME
+echo Approx. GPU Hours: $((RUNTIME * NUM_GPUS)) hrs

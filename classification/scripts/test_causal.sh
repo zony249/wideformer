@@ -3,9 +3,9 @@
 #SBATCH --gpus-per-node=a100:4
 #SBATCH --mem=64G
 #SBATCH --cpus-per-task=6
-#SBATCH --time=3-00:00
+#SBATCH --time=7-00:00
 #SBATCH --account=rrg-lilimou
-#SBATCH --output=slurm-logs/slurm-%j-%n-causal-pretrained-prediction.out
+#SBATCH --output=slurm-logs/slurm-%j-%n-qqp-generative-prediction.out
 
 
 # export CUDA_VISIBLE_DEVICES=6,7
@@ -13,14 +13,19 @@ export MODEL="deepseek-ai/DeepSeek-R1-Distill-Qwen-7B"
 # export MODEL="roberta-large"
 export TASK_NAME=qqp
 export EXP_NAME=$(date +%y-%m-%d--%T)--generative-predict
-export OUTPUT=runs/$EXP_NAME
-
+export OUTPUT=$SCRATCH/wideformer/classification/runs/$EXP_NAME
+export NUM_GPUS=4
 
 mkdir -p $OUTPUT
 
 
+
+export START=$(date +%s)
+
+
+
 torchrun \
-  --nproc_per_node=1 \
+  --nproc_per_node=$NUM_GPUS \
   finetune.py \
     --model_name_or_path $MODEL \
     --use_causal_lm \
@@ -37,7 +42,7 @@ torchrun \
     --optim adamw_hf \
     --max_new_tokens=1024 \
     --seed $((RANDOM % 100000)) \
-    --overwrite_cache \
+   #  --overwrite_cache \
 
 
 if [[ $TASK_NAME == "mnli" ]]; then
@@ -66,3 +71,10 @@ if [[ $TASK_NAME == "mnli" ]]; then
    export TASK=MNLI-mm
    python convert_glue_preds.py --input_file $OUTPUT/predict_results_$TASK_NAME-mm.txt --task $TASK
 fi
+
+
+export END=$(date +%s)
+
+export RUNTIME=$(((END-START)/3600)) hrs
+echo Total runtime: $RUNTIME
+echo Approx. GPU Hours: $((RUNTIME * NUM_GPUS)) hrs
