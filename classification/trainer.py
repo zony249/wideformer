@@ -354,6 +354,23 @@ def preds_to_output(preds, tok, look_for: Dict[str, int]):
     return {"loss": 0, "logits": output}
 
         
+def preds_to_output_regression(preds, tok): 
+    """
+    Converts decoded predictions (from generative model) into regression result.
+    """
+    preds_tok = tok.batch_decode(preds) 
+    output = []
+    for sent in preds_tok: 
+        search_area = sent.split("\n")[-1]
+        floats = re.findall(r"[-+]?(?:\d*\.*\d+)", search_area)
+        extracted = float(floats[-1]) 
+        if isinstance(extracted, float):
+            output.append([extracted])
+        else: 
+            output.append([0.0])
+
+    output = torch.tensor(output, device=preds.device)
+    return {"loss": 0, "logits": output}
 
 
 
@@ -4577,7 +4594,8 @@ class Trainer:
                                                      pad_token_id=model.config.eos_token_id, 
                                                      num_beams=5, 
                                                      max_new_tokens=self.args.max_new_tokens)
-                        outputs = preds_to_output(predictions, self.processing_class, look_for=self.model.config.label2id)
+                        outputs = preds_to_output(predictions, self.processing_class, look_for=self.model.config.label2id) if not self.args.is_regression \
+                                    else preds_to_output_regression(predictions, self.processing_class)
                         loss = None
                     else: 
                         with self.compute_loss_context_manager():
@@ -4595,7 +4613,8 @@ class Trainer:
                                                      pad_token_id=model.config.eos_token_id, 
                                                      num_beams=5, 
                                                      max_new_tokens=self.args.max_new_tokens)
-                        outputs = preds_to_output(predictions, self.processing_class, look_for=self.model.config.label2id)
+                        outputs = preds_to_output(predictions, self.processing_class, look_for=self.model.config.label2id) if not self.args.is_regression \
+                                    else preds_to_output_regression(predictions, self.processing_class)
                         loss = None
                     else: 
                         loss = None

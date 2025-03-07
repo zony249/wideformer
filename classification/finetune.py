@@ -100,8 +100,14 @@ special_tokens = {
     "assistant": 151645
 }
 task_to_prompt = {
+    "cola": (" Respond in one word whether the given sentence is linguistically acceptable. If the sentence exhibits morphological, syntactic, or semantic violations, respond with \"unacceptable\", otherwise respond with \"acceptable\": ", "\nThe answer is: "), 
     "mnli": (" Explain in one word whether the following pair of sentences exhibit logical \"entailment\", \"neutral\", or \"contradiction\": ", "\nThe relationship is: "), 
-    "qqp" : (" Respond in one word whether the folling two questions are paraphrases of each other or not. If they paraphrase each other, then respond with \"duplicate\", and if they don't, respond with \"not_duplicate\".", "\nThe answer is: ")
+    "mrpc": (" Respond in one word whether the following two sentences are equivalent or not. If they are equivalent, respond with \"equivalent\", otherwise respond with \"not_equivalent\": ", "\nThe answer is: "), 
+    "qnli" :(" Respond in one word for the following sentence pair, whether the first sentence logically entails the second. If it is a logical entailment, respond with \"entailment\", otherwise respond with \"not_entailment\": ", "\nThe answer is: "), 
+    "qqp" : (" Respond in one word whether the folling two questions are paraphrases of each other or not. If they paraphrase each other, then respond with \"duplicate\", and if they don't, respond with \"not_duplicate\".", "\nThe answer is: "),
+    "rte" : (" Respond in one word for the following sentence pair, whether the first sentence logically entails the second. If it is a logical entailment, respond with \"entailment\", otherwise respond with \"not_entailment\": ", "\nThe answer is: "), 
+    "sst2": (" Respond in one word for the following sentence, whether its sentiment is positive or negative. Respond with either \"positive\" or \"negative\": ", "\nThe answer is: "), 
+    "stsb": (" For the following sentence pair, respond with one number between 0 and 5 on how similar the two sentences are semantically, with 0 being completely dissimilar and 5 being semantically equivalent. Do not respond textually, i.e. respond with \"1\" instead of \"one\": ", "\nThe answer is: "), 
 }
 
 logger = logging.getLogger(__name__)
@@ -273,6 +279,10 @@ class CustomTrainingArguments(TrainingArguments):
         default=1,
         metadata={"help": "Under the causal generation setting, how many new tokens the model is allowed to generate."},
     )
+    is_regression: Optional[bool] = field(
+        default=False, 
+        metadata={"help": "Whether the task is regression or not."}
+    )
 
 
 def main():
@@ -422,7 +432,7 @@ def main():
 
     # Labels
     if data_args.task_name is not None:
-        is_regression = data_args.task_name == "stsb"
+        is_regression = data_args.task_name in ["stsb"]
         if not is_regression:
             label_list = raw_datasets["train"].features["label"].names
             num_labels = len(label_list)
@@ -439,6 +449,8 @@ def main():
             label_list = raw_datasets["train"].unique("label")
             label_list.sort()  # Let's sort it for determinism
             num_labels = len(label_list)
+
+    training_args.is_regression = is_regression
 
     if training_args.bf16: 
         model_load_dtype = torch.bfloat16 
@@ -587,7 +599,6 @@ def main():
         user = tokenizer.decode(special_tokens["user"])
         maybe_system_prompt = system_prompt if model_args.lora_adapter is None else ""
         examples[sentence1_key] = [maybe_system_prompt + user + task_to_prompt[data_args.task_name][0] + tokenizer.bos_token + ex for i, ex in enumerate(examples[sentence1_key])]
-        labels = [id2label[x] + "." if x >= 0  else "" for x in examples["label"]] 
         
         asst = tokenizer.decode(special_tokens["assistant"])
 
@@ -615,7 +626,10 @@ def main():
         user = tokenizer.decode(special_tokens["user"])
         maybe_system_prompt = system_prompt if model_args.lora_adapter is None else ""
         examples[sentence1_key] = [maybe_system_prompt + user + task_to_prompt[data_args.task_name][0] + tokenizer.bos_token + ex for i, ex in enumerate(examples[sentence1_key])]
-        labels = [id2label[x] + "." if x >= 0  else "" for x in examples["label"]] 
+        if data_args.task_name in ["stsb"]: 
+            labels = [f"{x:.3f}" + "." for x in examples["label"]]
+        else:
+            labels = [id2label[x] + "." if x >= 0  else "" for x in examples["label"]] 
         
         asst = tokenizer.decode(special_tokens["assistant"])
 
