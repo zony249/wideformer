@@ -297,6 +297,14 @@ class CustomTrainingArguments(TrainingArguments):
         default = False, 
         metadata = {"help": "Reverse matching"}
     )
+    match_all_layers_to: Optional[int] = field(
+        default = None, 
+        metadata = {"help": "match all student layers to teacher layer X"}
+    )
+    random_shuffle: Optional[bool] = field(
+        default=False, 
+        metadata={"help": "randomly shuffle the layers"}
+    )
     hidden_alpha: Optional[float] = field(
         default = 3.0, 
         metadata = {"help": "hidden loss balancing coefficient"}

@@ -5354,6 +5354,9 @@ class DistillTrainer(Trainer):
 
 
         self.reverse = self.args.reverse 
+        self.all_to_one = self.args.match_all_layers_to
+        self.random_shuffle = self.args.random_shuffle 
+
         self.hidden_alpha = self.args.hidden_alpha 
         self.kl_alpha = self.args.kl_alpha 
         self.ce_alpha = self.args.ce_alpha 
@@ -5362,6 +5365,12 @@ class DistillTrainer(Trainer):
         self.state.mets = [("loss", None), ("ce_loss", None), ("kl_loss", None), ("hidden_loss", None)]
 
         print("====== DISTILLATION SETTINGS ======")
+        if self.all_to_one is not None: 
+            self.layer_map = [self.all_to_one for _ in range(len(self.layer_map))]
+            print("\tMatching: All to teacher layer", self.all_to_one) 
+        if self.random_shuffle: 
+            self.layer_map = [self.layer_map[i] for i in list(torch.randperm(len(self.layer_map)))]
+            print("\tMatching: shuffle")
         if self.reverse: 
             self.layer_map = self.layer_map[::-1] 
             print("\tMatching: reverse")
