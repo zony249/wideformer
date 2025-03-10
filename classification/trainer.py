@@ -179,6 +179,7 @@ from transformers.utils import (
 )
 from transformers.utils.deprecation import deprecate_kwarg
 from transformers.utils.quantization_config import QuantizationMethod
+from layer_mappings import LAYER_MAPPING
 
 
 DEFAULT_CALLBACKS = [DefaultFlowCallback]
@@ -3789,7 +3790,6 @@ class Trainer:
                 torch.cuda.empty_cache()
 
         kwargs = {}
-        self.state.mets = [("loss",  f"{loss.detach().item():.4f}")] 
 
         # For LOMO optimizers you need to explicitly use the learnign rate
         if self.args.optim in [OptimizerNames.LOMO, OptimizerNames.ADALOMO]:
@@ -3855,6 +3855,8 @@ class Trainer:
 
         if self.args.average_tokens_across_devices and self.model_accepts_loss_kwargs:
             loss *= self.accelerator.num_processes
+
+        self.state.mets = [("loss",  f"{loss.detach().item():.4f}")] 
 
         return (loss, outputs) if return_outputs else loss
 
@@ -5299,3 +5301,217 @@ class Trainer:
             num_items_in_batch = num_items_in_batch.item()
 
         return batch_samples, num_items_in_batch
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+class DistillTrainer(Trainer): 
+    def __init__(self, teacher, *args, **kwargs): 
+
+        self.teacher = teacher 
+
+
+        super().__init__(*args, **kwargs) 
+
+        if (
+            self.place_model_on_device
+            and not getattr(self.teacher, "quantization_method", None) == QuantizationMethod.BITS_AND_BYTES
+        ):
+            self._move_model_to_device(self.teacher, self.args.device)
+
+
+        self.reverse = self.args.reverse 
+        self.hidden_alpha = self.args.hidden_alpha 
+        self.kl_alpha = self.args.kl_alpha 
+        self.ce_alpha = self.args.ce_alpha 
+
+        self.layer_map = LAYER_MAPPING[self.teacher.config.num_hidden_layers][self.model.config.num_hidden_layers] 
+        self.state.mets = [("loss", None), ("ce_loss", None), ("kl_loss", None), ("hidden_loss", None)]
+
+        print("====== DISTILLATION SETTINGS ======")
+        if self.reverse: 
+            self.layer_map = self.layer_map[::-1] 
+            print("\tMatching: reverse")
+        else: 
+            print("\tMatching: forward")
+        
+        print("\tLayer Mapping: ", self.layer_map) 
+
+        print("\n\n\n")
+
+
+
+
+
+    
+    def compute_loss(self, model, inputs, return_outputs=False, num_items_in_batch=None):
+        """
+        How the loss is computed by Trainer. By default, all models return the loss in the first element.
+
+        Subclass and override for custom behavior.
+        """
+        # if we define our own loss function, then labels will be pulled out of inputs and loss will be computed 
+        # separately
+        if (self.label_smoother is not None or self.compute_loss_func is not None) and "labels" in inputs:
+            labels = inputs.pop("labels")
+        else:
+            labels = None
+        if self.model_accepts_loss_kwargs:
+            loss_kwargs = {}
+            if num_items_in_batch is not None:
+                loss_kwargs["num_items_in_batch"] = num_items_in_batch
+            inputs = {**inputs, **loss_kwargs}
+
+
+        # CE LOSS
+        outputs = model(**inputs, output_hidden_states=True)
+        # Save past state if it exists
+        # TODO: this needs to be fixed and made cleaner later.
+        if self.args.past_index >= 0:
+            self._past = outputs[self.args.past_index]
+
+        if labels is not None:
+            unwrapped_model = self.accelerator.unwrap_model(model)
+            if _is_peft_model(unwrapped_model):
+                model_name = unwrapped_model.base_model.model._get_name()
+            else:
+                model_name = unwrapped_model._get_name()
+            # User-defined compute_loss function
+            if self.compute_loss_func is not None:
+                loss = self.compute_loss_func(outputs, labels, num_items_in_batch=num_items_in_batch)
+            elif model_name in MODEL_FOR_CAUSAL_LM_MAPPING_NAMES.values():
+                loss = self.label_smoother(outputs, labels, shift_labels=True)
+            else:
+                loss = self.label_smoother(outputs, labels)
+        else:
+            if isinstance(outputs, dict) and "loss" not in outputs:
+                raise ValueError(
+                    "The model did not return a loss from the inputs, only the following keys: "
+                    f"{','.join(outputs.keys())}. For reference, the inputs it received are {','.join(inputs.keys())}."
+                )
+            # We don't use .loss here since the model may return tuples instead of ModelOutput.
+            loss = outputs["loss"] if isinstance(outputs, dict) else outputs[0]
+
+
+        # DISTILLATION LOSSES 
+
+        with torch.no_grad(): 
+            t_outputs = self.teacher(**inputs, output_hidden_states=True)
+            t_hidden = t_outputs["hidden_states"]
+            t_logits = t_outputs["logits"]
+
+        kl_loss = self.kl_loss(t_logits, outputs["logits"]) if self.kl_alpha > 0. else torch.tensor(0)
+
+
+        t_hidden, s_hidden = self.select_hidden_states(t_hidden, outputs["hidden_states"], self.layer_map) 
+
+        hidden_loss = self.hidden_loss(t_hidden, s_hidden, inputs["attention_mask"]) \
+            if self.hidden_alpha > 0. else torch.tensor(0)
+
+        ce_loss = loss 
+        loss = self.kl_alpha * kl_loss + self.ce_alpha * ce_loss + self.hidden_alpha * hidden_loss
+
+
+        if self.args.average_tokens_across_devices and self.model_accepts_loss_kwargs:
+            loss *= self.accelerator.num_processes
+
+        outputs["hidden_states"] = None
+
+        self.state.mets = [("loss", loss.item()), ("ce_loss", ce_loss.item()), ("kl_loss", kl_loss.item()), ("hidden_loss", hidden_loss.item())]
+
+        return (loss, outputs) if return_outputs else loss
+
+    
+    def kl_loss(self, p, q): 
+        """
+        p: target
+        q: input
+        """
+
+        inputs = F.log_softmax(q, dim=-1)
+        targets = F.softmax(p, dim=-1) 
+        kl_loss = nn.KLDivLoss(reduction="batchmean")
+        loss = kl_loss(inputs, targets) 
+        return loss
+
+
+    def hidden_loss(self, 
+                    teacher_states: List[torch.Tensor], 
+                    student_states: List[torch.Tensor], 
+                    attention_mask: torch.Tensor, 
+                    norm_hidden_states: Optional[bool] = True) -> torch.Tensor:  
+        """
+        mse loss
+        
+        teacher_states: Tuple(Tensor[batch_size, sequence_len, common_hidden_dim]) 
+        student_states: Tuple(Tensor[batch_size, sequence_len, common_hidden_dim]) 
+        attention_mask: Tensor[batch_size, sequence_len]
+        """
+        assert len(teacher_states) == len(student_states), "Number of teacher and student states do not match" 
+
+        if norm_hidden_states: 
+            teacher_states = [t / t.norm(dim=-1, keepdim=True) for t in teacher_states]
+            student_states = [s / s.norm(dim=-1, keepdim=True) for s in student_states]
+
+
+        diffs = [((t - s) * (t - s)).sum(dim=-1) for t, s in zip(teacher_states, student_states)]
+        valids = attention_mask.sum()
+        # normalized by the number of valids
+        normed_losses = [(l * attention_mask).mean(dim=0).sum()/valids for l in diffs]
+
+        reduction = 0 
+        for nl in normed_losses:
+            reduction += nl
+        reduction /= len(normed_losses)
+        
+        return reduction 
+
+    def select_hidden_states(self, 
+                             teacher_states: Tuple[torch.Tensor], 
+                             student_states: Tuple[torch.Tensor], 
+                             layer_mapping: List[int], 
+                             include_emb: Optional[bool] = False): 
+
+        if include_emb: 
+            l = [x + 1 for x in layer_mapping] 
+            l = [0] + l 
+        else: 
+            l = [x + 1 for x in layer_mapping] 
+
+        t_hidden = [teacher_states[i] for i in l] 
+
+        s_hidden = student_states if include_emb else student_states[1:] 
+        return t_hidden, s_hidden
