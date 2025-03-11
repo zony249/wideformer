@@ -5436,30 +5436,34 @@ class DistillTrainer(Trainer):
 
 
         # DISTILLATION LOSSES 
+        if not self.control.should_evaluate:
+            with torch.no_grad(): 
+                t_outputs = self.teacher(**inputs, output_hidden_states=True)
+                t_hidden = t_outputs["hidden_states"]
+                t_logits = t_outputs["logits"]
 
-        with torch.no_grad(): 
-            t_outputs = self.teacher(**inputs, output_hidden_states=True)
-            t_hidden = t_outputs["hidden_states"]
-            t_logits = t_outputs["logits"]
-
-        kl_loss = self.kl_loss(t_logits, outputs["logits"]) if self.kl_alpha > 0. else torch.tensor(0)
+            kl_loss = self.kl_loss(t_logits, outputs["logits"]) if self.kl_alpha > 0. else torch.tensor(0)
 
 
-        t_hidden, s_hidden = self.select_hidden_states(t_hidden, outputs["hidden_states"], self.layer_map) 
+            t_hidden, s_hidden = self.select_hidden_states(t_hidden, outputs["hidden_states"], self.layer_map) 
 
-        hidden_loss = self.hidden_loss(t_hidden, s_hidden, inputs["attention_mask"]) \
-            if self.hidden_alpha > 0. else torch.tensor(0)
+            hidden_loss = self.hidden_loss(t_hidden, s_hidden, inputs["attention_mask"]) \
+                if self.hidden_alpha > 0. else torch.tensor(0)
 
-        ce_loss = loss 
-        loss = self.kl_alpha * kl_loss + self.ce_alpha * ce_loss + self.hidden_alpha * hidden_loss
 
+            ce_loss = loss 
+            loss = self.kl_alpha * kl_loss + self.ce_alpha * ce_loss + self.hidden_alpha * hidden_loss
+
+            self.state.mets = [("loss", loss.item()), ("ce_loss", ce_loss.item()), ("kl_loss", kl_loss.item()), ("hidden_loss", hidden_loss.item())]
+        else: 
+            self.state.mets = [("loss", loss.item())]
 
         if self.args.average_tokens_across_devices and self.model_accepts_loss_kwargs:
             loss *= self.accelerator.num_processes
 
+
         outputs["hidden_states"] = None
 
-        self.state.mets = [("loss", loss.item()), ("ce_loss", ce_loss.item()), ("kl_loss", kl_loss.item()), ("hidden_loss", hidden_loss.item())]
 
         return (loss, outputs) if return_outputs else loss
 

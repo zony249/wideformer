@@ -572,10 +572,13 @@ def main():
     # If only teacher specified then student will be init from teacher
     # otherwise, load student from args.
     if model_args.student_init_strategy == "weight_copy": 
-        student = init_student_from_teacher(teacher, model_args.num_student_layers) 
+        student = init_student_from_teacher(teacher, model_args.num_student_layers, model_args) 
     else: 
         student = init_student_from_random(model.args.num_student_layers)
     
+
+    print_trainable_parameters(student)
+
 
 
     # Preprocessing the raw_datasets
