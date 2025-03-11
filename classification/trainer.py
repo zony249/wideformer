@@ -4606,7 +4606,7 @@ class Trainer:
 
 
                     if isinstance(outputs, dict):
-                        logits = tuple(v for k, v in outputs.items() if k not in ignore_keys + ["loss"])
+                        logits = tuple(v for k, v in outputs.items() if k not in ignore_keys + ["loss", "hidden_states"])
                     else:
                         logits = outputs[1:]
                 else:
@@ -4625,7 +4625,7 @@ class Trainer:
                         # TODO: use model generate, write decoding function to obtain label. 
 
                     if isinstance(outputs, dict):
-                        logits = tuple(v for k, v in outputs.items() if k not in ignore_keys + ["loss"])
+                        logits = tuple(v for k, v in outputs.items() if k not in ignore_keys + ["loss", "hidden_states"])
                     else:
                         logits = outputs
                     # TODO: this needs to be fixed and made cleaner later.
@@ -4637,7 +4637,7 @@ class Trainer:
 
         logits = nested_detach(logits)
         if len(logits) == 1:
-            logits = logits[0]
+            logits = logits[0] # For logits we really don't care about other items
 
         return (loss, logits, labels)
 
