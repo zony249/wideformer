@@ -5528,3 +5528,75 @@ class DistillTrainer(Trainer):
 
         s_hidden = student_states if include_emb else student_states[1:] 
         return t_hidden, s_hidden
+
+
+
+
+    def _maybe_log_save_evaluate(self, tr_loss, grad_norm, model, trial, epoch, ignore_keys_for_eval, start_time):
+        """
+        Only difference from parent class method is that for DistillTrainer, we save the
+        base student model as well.
+        """
+        if self.control.should_log and self.state.global_step > self._globalstep_last_logged:
+            if is_torch_xla_available():
+                xm.mark_step()
+
+            logs: Dict[str, float] = {}
+
+            # all_gather + mean() to get average loss over all processes
+            tr_loss_scalar = self._nested_gather(tr_loss).mean().item()
+
+            # reset tr_loss to zero
+            tr_loss -= tr_loss
+
+            logs["loss"] = round(tr_loss_scalar / (self.state.global_step - self._globalstep_last_logged), 4)
+            if grad_norm is not None:
+                logs["grad_norm"] = grad_norm.detach().item() if isinstance(grad_norm, torch.Tensor) else grad_norm
+            logs["learning_rate"] = self._get_learning_rate()
+
+            self._total_loss_scalar += tr_loss_scalar
+            self._globalstep_last_logged = self.state.global_step
+            self.store_flos()
+
+            self.log(logs, start_time)
+
+        metrics = None
+        if self.control.should_evaluate:
+            metrics = self._evaluate(trial, ignore_keys_for_eval)
+            is_new_best_metric = self._determine_best_metric(metrics=metrics, trial=trial)
+
+            if self.args.save_strategy == SaveStrategy.BEST:
+                self.control.should_save = is_new_best_metric
+            
+            ## override because I want to specify save format
+            ## TODO 
+            best_tfmr_dir = os.path.join(self.args.output_dir, "best_tfmr")
+            os.makedirs(best_tfmr_dir, exist_ok=True)
+            with open(os.path.join(best_tfmr_dir, "all_metrics.log"), "a") as f: 
+                f.write(f"Step {self.state.global_step} results:" + str(metrics) + "\n")
+            if is_new_best_metric: 
+                self._save(best_tfmr_dir)
+                # save base model
+                supported_classes = (PreTrainedModel,) if not is_peft_available() else (PreTrainedModel, PeftModel)
+                if not isinstance(self.model, supported_classes):
+                    if isinstance(self.accelerator.unwrap_model(self.model), supported_classes):
+                        maybe_peft = self.accelerator.unwrap_model(self.model)
+                        if isinstance(maybe_peft, PeftModel): 
+                            unwrapped_base_model = maybe_peft.unwrap() 
+                            unwrapped_base_model.save_pretrained(best_tfmr_dir)
+                        elif isinstance(maybe_peft, PreTrainedModel): 
+                            pass
+                            # maybe_peft.save_pretrained(best_tfmr_dir)
+                else: 
+                    if isinstance(self.model, PeftModel): 
+                        unwrapped_base_model = self.model.unload() 
+                        unwrapped_base_model.save_pretrained(best_tfmr_dir)
+                    elif isinstance(self.model, PreTrainedModel): 
+                        pass # if self.model is already a pre-trained model, it is already saved with _save()
+                        # self.model.save_pretrained(best_tfmr_dir) 
+                with open(os.path.join(best_tfmr_dir, "best_metrics.log"), "a") as f: 
+                    f.write(f"Step {self.state.global_step} results:" + str(metrics) + "\n")
+
+        if self.control.should_save:
+            self._save_checkpoint(model, trial)
+            self.control = self.callback_handler.on_save(self.args, self.state, self.control)
