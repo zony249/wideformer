@@ -32,6 +32,7 @@ import sys
 import tempfile
 import time
 import warnings
+from copy import deepcopy
 from collections.abc import Mapping
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Tuple, Type, Union
@@ -5351,6 +5352,23 @@ class DistillTrainer(Trainer):
             and not getattr(self.teacher, "quantization_method", None) == QuantizationMethod.BITS_AND_BYTES
         ):
             self._move_model_to_device(self.teacher, self.args.device)
+        
+        supported_classes = (PreTrainedModel,) if not is_peft_available() else (PreTrainedModel, PeftModel)
+        if not isinstance(self.model, supported_classes):
+            if isinstance(self.accelerator.unwrap_model(self.model), supported_classes):
+                maybe_peft = self.accelerator.unwrap_model(self.model)
+                if isinstance(maybe_peft, PeftModel): 
+                    unwrapped_base_model = deepcopy(maybe_peft).unload() 
+                    unwrapped_base_model.save_pretrained(self.args.output_dir)
+                elif isinstance(maybe_peft, PreTrainedModel): 
+                    pass # if self.model is already a pre-trained model, it is already saved with _save()
+        else: 
+            if isinstance(self.model, PeftModel): 
+                unwrapped_base_model = deepcopy(self.model).unload() 
+                unwrapped_base_model.save_pretrained(self.args.output_dir)
+            elif isinstance(self.model, PreTrainedModel): 
+                pass # if self.model is already a pre-trained model, it is already saved with _save()
+                # self.model.save_pretrained(best_tfmr_dir) 
 
 
         self.reverse = self.args.reverse 
@@ -5577,23 +5595,23 @@ class DistillTrainer(Trainer):
             if is_new_best_metric: 
                 self._save(best_tfmr_dir)
                 # save base model
-                supported_classes = (PreTrainedModel,) if not is_peft_available() else (PreTrainedModel, PeftModel)
-                if not isinstance(self.model, supported_classes):
-                    if isinstance(self.accelerator.unwrap_model(self.model), supported_classes):
-                        maybe_peft = self.accelerator.unwrap_model(self.model)
-                        if isinstance(maybe_peft, PeftModel): 
-                            unwrapped_base_model = maybe_peft.unwrap() 
-                            unwrapped_base_model.save_pretrained(best_tfmr_dir)
-                        elif isinstance(maybe_peft, PreTrainedModel): 
-                            pass
-                            # maybe_peft.save_pretrained(best_tfmr_dir)
-                else: 
-                    if isinstance(self.model, PeftModel): 
-                        unwrapped_base_model = self.model.unload() 
-                        unwrapped_base_model.save_pretrained(best_tfmr_dir)
-                    elif isinstance(self.model, PreTrainedModel): 
-                        pass # if self.model is already a pre-trained model, it is already saved with _save()
-                        # self.model.save_pretrained(best_tfmr_dir) 
+                # supported_classes = (PreTrainedModel,) if not is_peft_available() else (PreTrainedModel, PeftModel)
+                # if not isinstance(self.model, supported_classes):
+                #     if isinstance(self.accelerator.unwrap_model(self.model), supported_classes):
+                #         maybe_peft = self.accelerator.unwrap_model(self.model)
+                #         if isinstance(maybe_peft, PeftModel): 
+                #             unwrapped_base_model = maybe_peft.unwrap() 
+                #             unwrapped_base_model.save_pretrained(best_tfmr_dir)
+                #         elif isinstance(maybe_peft, PreTrainedModel): 
+                #             pass
+                #             # maybe_peft.save_pretrained(best_tfmr_dir)
+                # else: 
+                #     if isinstance(self.model, PeftModel): 
+                #         unwrapped_base_model = self.model.unload() 
+                #         unwrapped_base_model.save_pretrained(best_tfmr_dir)
+                #     elif isinstance(self.model, PreTrainedModel): 
+                #         pass # if self.model is already a pre-trained model, it is already saved with _save()
+                #         # self.model.save_pretrained(best_tfmr_dir) 
                 with open(os.path.join(best_tfmr_dir, "best_metrics.log"), "a") as f: 
                     f.write(f"Step {self.state.global_step} results:" + str(metrics) + "\n")
 
