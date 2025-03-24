@@ -5365,7 +5365,7 @@ class DistillTrainer(Trainer):
         else: 
             if isinstance(self.model, PeftModel): 
                 unwrapped_base_model = deepcopy(self.model).unload() 
-                unwrapped_base_model.save_pretrained(self.args.output_dir)
+                unwrapped_base_model.save_pretrained(os.path.join(self.args.output_dir, "base_model"))
             elif isinstance(self.model, PreTrainedModel): 
                 pass # if self.model is already a pre-trained model, it is already saved with _save()
                 # self.model.save_pretrained(best_tfmr_dir) 

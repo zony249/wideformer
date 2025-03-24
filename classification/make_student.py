@@ -66,7 +66,7 @@ if __name__ == "__main__":
     cache_dir = "glue_train"
     model_load_dtype=torch.bfloat16
     student_init_strategy = "weight_copy"
-    num_student_layers = 3
+    num_student_layers = 7
 
 
     config = AutoConfig.from_pretrained(
@@ -148,6 +148,6 @@ if __name__ == "__main__":
         student = init_student_from_random(model.args.num_student_layers)
 
     student = student.unload()    
-    student.save_pretrained("deepseek-student-3l-mnli-base")
+    student.save_pretrained("deepseek-student-7l-mnli-base")
     # print_trainable_parameters(student)
 
