@@ -18,6 +18,7 @@ from transformers import (
     AutoModelForSeq2SeqLM,
     AutoModelForSequenceClassification,
     AutoModelForTokenClassification,
+    AutoModelForCausalLM, 
     AutoModelWithLMHead,
     AutoTokenizer,
     EvalPrediction, 
@@ -32,6 +33,7 @@ from transformers.optimization import (
     get_polynomial_decay_schedule_with_warmup,
 )
 from transformers.trainer_utils import TrainOutput
+from peft import LoraConfig, PeftModel, get_peft_model, TaskType, PeftConfig
 
 from transformers.utils.versions import require_version
 from utils import LegacySeq2SeqDataset, trim_batch, Seq2SeqDataset, Seq2SeqDataCollator
@@ -115,14 +117,30 @@ class BaseTransformer(pl.LightningModule):
             self.tokenizer: PreTrainedTokenizer = tokenizer
         self.model_type = MODEL_MODES[mode]
         if model is None:
+            if self.config.model_type in ["qwen2"]: 
+                self.model_type = AutoModelForCausalLM
             self.model = self.model_type.from_pretrained(
                 self.hparams.model_name_or_path,
                 # from_tf=bool(".ckpt" in self.hparams.model_name_or_path),
                 config=self.config,
                 cache_dir=cache_dir,
+                torch_dtype = torch.bfloat16 if self.config.model_type in ["qwen2"] else torch.float32
             )
         else:
             self.model = model
+
+        if self.hparams.lora_adapter is not None: 
+            if self.hparams.lora_adapter == "random_init": 
+                lora_config = LoraConfig(
+                    r=64, 
+                    init_lora_weights="gaussian", 
+                    target_modules="all-linear", 
+                    task_type=TaskType.CAUSAL_LM if self.config.model_type in ["qwen2"] else TaskType.SEQ_2_SEQ_LM, 
+                )
+                self.model = get_peft_model(self.model, lora_config)
+                self.model.print_trainable_parameters()
+            else: 
+                self.model = PeftModel.from_pretrained(self.model, self.hparams.lora_adapter)
 
         # for T5
         # def make_inputs_require_grad(module, input, output):

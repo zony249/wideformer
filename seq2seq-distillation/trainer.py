@@ -32,6 +32,7 @@ import sys
 import tempfile
 import time
 import warnings
+from copy import deepcopy
 from collections.abc import Mapping
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Tuple, Type, Union
@@ -50,6 +51,7 @@ import huggingface_hub.utils as hf_hub_utils
 import numpy as np
 import torch
 import torch.distributed as dist
+import torch.nn.functional as F
 from huggingface_hub import ModelCard, create_repo, upload_folder
 from packaging import version
 from torch import nn
@@ -178,13 +180,14 @@ from transformers.utils import (
 )
 from transformers.utils.deprecation import deprecate_kwarg
 from transformers.utils.quantization_config import QuantizationMethod
+from layer_mappings import LAYER_MAPPING
 
 
 DEFAULT_CALLBACKS = [DefaultFlowCallback]
 DEFAULT_PROGRESS_CALLBACK = ProgressCallback
 
 if is_in_notebook():
-    from .utils.notebook import NotebookProgressCallback
+    from transformers.utils.notebook import NotebookProgressCallback
 
     DEFAULT_PROGRESS_CALLBACK = NotebookProgressCallback
 
@@ -319,6 +322,60 @@ class CustomProgressCallBack(ProgressCallback):
             self.training_bar.update(state.global_step - self.current_step)
             self.current_step = state.global_step
             self.training_bar.set_postfix(state.mets)
+
+
+class PrefixCollator: 
+
+    def __init__(self, data_collator, prefix): 
+        self.prefix = prefix 
+        self.data_collator = data_collator 
+    def __call__(self, batch): 
+        data = self.data_collator(batch)
+        return data
+
+
+def preds_to_output(preds, tok, look_for: Dict[str, int]): 
+    """
+    Converts decoded predictions (from generative model) into classification result.
+    Works by counting occurrances of target words.
+    """
+    preds_tok = tok.batch_decode(preds) 
+    output = []
+    for sent in preds_tok: 
+        counts = {k:0 for k in look_for} 
+        for item in look_for: 
+            counts[item] = sent.split("\n")[-1].lower().count(item) 
+        # print(sent)
+        # print(sent.split("\n")[-1])
+        # print(counts)
+        # print(max(counts, key=counts.get))
+        max_key = max(counts, key=counts.get)
+        output.append(look_for[max_key])
+    output = torch.tensor(output, device=preds.device)
+    output = F.one_hot(output, num_classes=len(look_for))
+    return {"loss": 0, "logits": output}
+
+        
+def preds_to_output_regression(preds, tok): 
+    """
+    Converts decoded predictions (from generative model) into regression result.
+    """
+    preds_tok = tok.batch_decode(preds) 
+    output = []
+    for sent in preds_tok: 
+        search_area = sent.split("\n")[-1]
+        floats = re.findall(r"[-+]?(?:\d*\.*\d+)", search_area)
+        extracted = float(floats[-1]) 
+        if isinstance(extracted, float):
+            output.append([extracted])
+        else: 
+            output.append([0.0])
+
+    output = torch.tensor(output, device=preds.device)
+    return {"loss": 0, "logits": output}
+
+
+
 
 
 
@@ -1011,10 +1068,10 @@ class Trainer:
 
         train_dataset = self.train_dataset
         data_collator = self.data_collator
-        # if is_datasets_available() and isinstance(train_dataset, datasets.Dataset):
-        #     train_dataset = self._remove_unused_columns(train_dataset, description="training")
-        # else:
-        #     data_collator = self._get_collator_with_removed_columns(data_collator, description="training")
+        if is_datasets_available() and isinstance(train_dataset, datasets.Dataset):
+            train_dataset = self._remove_unused_columns(train_dataset, description="training")
+        else:
+            data_collator = self._get_collator_with_removed_columns(data_collator, description="training")
 
         dataloader_params = {
             "batch_size": self._train_batch_size,
@@ -1107,10 +1164,10 @@ class Trainer:
         )
         data_collator = self.data_collator
 
-        # if is_datasets_available() and isinstance(eval_dataset, datasets.Dataset):
-        #     eval_dataset = self._remove_unused_columns(eval_dataset, description="evaluation")
-        # else:
-        #     data_collator = self._get_collator_with_removed_columns(data_collator, description="evaluation")
+        if is_datasets_available() and isinstance(eval_dataset, datasets.Dataset):
+            eval_dataset = self._remove_unused_columns(eval_dataset, description="evaluation")
+        else:
+            data_collator = self._get_collator_with_removed_columns(data_collator, description="evaluation")
 
         dataloader_params = {
             "batch_size": self.args.eval_batch_size,
@@ -1324,7 +1381,7 @@ class Trainer:
             optimizer_cls = Adafactor
             optimizer_kwargs.update({"scale_parameter": False, "relative_step": False})
         elif args.optim == OptimizerNames.ADAMW_HF:
-            from .optimization import AdamW
+            from transformers.optimization import AdamW
 
             optimizer_cls = AdamW
             optimizer_kwargs.update(adam_kwargs)
@@ -3088,7 +3145,7 @@ class Trainer:
 
             if self.args.save_strategy == SaveStrategy.BEST:
                 self.control.should_save = is_new_best_metric
-
+            
             ## override because I want to specify save format
             ## TODO 
             best_tfmr_dir = os.path.join(self.args.output_dir, "best_tfmr")
@@ -3697,6 +3754,22 @@ class Trainer:
             loss_mb = smp_forward_backward(model, inputs, self.args.gradient_accumulation_steps)
             return loss_mb.reduce_mean().detach().to(self.args.device)
 
+
+
+
+        #set labels as input. shifting should be done automatically. 
+        unwrapped_model = self.accelerator.unwrap_model(model)
+        unwrapped_model = unwrapped_model.model 
+        if _is_peft_model(unwrapped_model):
+            model_name = unwrapped_model.base_model.model._get_name()
+        else:
+            model_name = unwrapped_model._get_name()
+        # User-defined compute_loss function
+        if model_name in MODEL_FOR_CAUSAL_LM_MAPPING_NAMES.values():
+            inputs["labels"] = inputs["input_ids"]#torch.cat([inputs["input_ids"][:, :-1], torch.ones_like(inputs["input_ids"][:, 0:1]) * self.processing_class.eos_token_id], axis=-1)
+
+
+
         with self.compute_loss_context_manager():
             loss = self.compute_loss(model, inputs, num_items_in_batch=num_items_in_batch)
 
@@ -3719,7 +3792,6 @@ class Trainer:
                 torch.cuda.empty_cache()
 
         kwargs = {}
-        self.state.mets = [("loss",  f"{loss.detach().item():.4f}")] 
 
         # For LOMO optimizers you need to explicitly use the learnign rate
         if self.args.optim in [OptimizerNames.LOMO, OptimizerNames.ADALOMO]:
@@ -3750,11 +3822,11 @@ class Trainer:
             labels = inputs.pop("labels")
         else:
             labels = None
-        # if self.model_accepts_loss_kwargs:
-        #     loss_kwargs = {}
-        #     if num_items_in_batch is not None:
-        #         loss_kwargs["num_items_in_batch"] = num_items_in_batch
-        #     inputs = {**inputs, **loss_kwargs}
+        if self.model_accepts_loss_kwargs:
+            loss_kwargs = {}
+            if num_items_in_batch is not None:
+                loss_kwargs["num_items_in_batch"] = num_items_in_batch
+            inputs = {**inputs, **loss_kwargs}
         outputs = model(**inputs)
         # Save past state if it exists
         # TODO: this needs to be fixed and made cleaner later.
@@ -3785,6 +3857,8 @@ class Trainer:
 
         if self.args.average_tokens_across_devices and self.model_accepts_loss_kwargs:
             loss *= self.accelerator.num_processes
+
+        self.state.mets = [("loss",  f"{loss.detach().item():.4f}")] 
 
         return (loss, outputs) if return_outputs else loss
 
@@ -3947,15 +4021,11 @@ class Trainer:
                 self.accelerator.unwrap_model(self.model).save_pretrained(
                     output_dir, state_dict=state_dict, safe_serialization=self.args.save_safetensors
                 )
-            elif isinstance(self.accelerator.unwrap_model(self.model).model, supported_classes):
-                self.accelerator.unwrap_model(self.model).model.save_pretrained(
-                    output_dir, safe_serialization=self.args.save_safetensors
-                )
             else:
                 logger.info("Trainer.model is not a `PreTrainedModel`, only saving its state dict.")
                 if self.args.save_safetensors:
-                    safetensors.torch.save_model(
-                        self.model, os.path.join(output_dir, SAFE_WEIGHTS_NAME), metadata={"format": "pt"}
+                    safetensors.torch.save_file(
+                        state_dict, os.path.join(output_dir, SAFE_WEIGHTS_NAME), metadata={"format": "pt"}
                     )
                 else:
                     torch.save(state_dict, os.path.join(output_dir, WEIGHTS_NAME))
@@ -4273,10 +4343,10 @@ class Trainer:
             self._past = None
 
         # Initialize containers
-        all_losses = EvalLoopContainer(self.args.eval_do_concat_batches, padding_index=self.model.model.config.pad_token_id)
-        all_preds = EvalLoopContainer(self.args.eval_do_concat_batches, padding_index=self.model.model.config.pad_token_id)
-        all_labels = EvalLoopContainer(self.args.eval_do_concat_batches, padding_index=self.model.model.config.pad_token_id)
-        all_inputs = EvalLoopContainer(self.args.eval_do_concat_batches, padding_index=self.model.model.config.pad_token_id)
+        all_losses = EvalLoopContainer(self.args.eval_do_concat_batches, padding_index=-100)
+        all_preds = EvalLoopContainer(self.args.eval_do_concat_batches, padding_index=-100)
+        all_labels = EvalLoopContainer(self.args.eval_do_concat_batches, padding_index=-100)
+        all_inputs = EvalLoopContainer(self.args.eval_do_concat_batches, padding_index=-100)
 
         metrics = None
         eval_set_kwargs = {}
@@ -4309,23 +4379,23 @@ class Trainer:
                 losses = self.gather_function((losses.repeat(batch_size)))
                 all_losses.add(losses)
             if inputs_decode is not None:
-                # inputs_decode = self.accelerator.pad_across_processes(inputs_decode, dim=1, pad_index=-100)
-                # inputs_decode = self.gather_function((inputs_decode))
-                # if not self.args.batch_eval_metrics or description == "Prediction":
+                inputs_decode = self.accelerator.pad_across_processes(inputs_decode, dim=1, pad_index=-100)
+                inputs_decode = self.gather_function((inputs_decode))
+                if not self.args.batch_eval_metrics or description == "Prediction":
                     all_inputs.add(inputs_decode)
             if labels is not None:
                 # Pad labels here, preparing for preprocess_logits_for_metrics in next logits block.
                 labels = self.accelerator.pad_across_processes(labels, dim=1, pad_index=-100)
             if logits is not None:
-                # logits = self.accelerator.pad_across_processes(logits, dim=1, pad_index=-100)
-                # if self.preprocess_logits_for_metrics is not None:
-                #     logits = self.preprocess_logits_for_metrics(logits, labels)
-                # logits = self.gather_function((logits))
-                # if not self.args.batch_eval_metrics or description == "Prediction":
+                logits = self.accelerator.pad_across_processes(logits, dim=1, pad_index=-100)
+                if self.preprocess_logits_for_metrics is not None:
+                    logits = self.preprocess_logits_for_metrics(logits, labels)
+                logits = self.gather_function((logits))
+                if not self.args.batch_eval_metrics or description == "Prediction":
                     all_preds.add(logits)
             if labels is not None:
-                # labels = self.gather_function((labels))
-                # if not self.args.batch_eval_metrics or description == "Prediction":
+                labels = self.gather_function((labels))
+                if not self.args.batch_eval_metrics or description == "Prediction":
                     all_labels.add(labels)
 
             self.control = self.callback_handler.on_prediction_step(args, self.state, self.control)
@@ -4488,6 +4558,19 @@ class Trainer:
         else:
             labels = None
 
+
+
+        unwrapped_model = self.accelerator.unwrap_model(model)
+        if _is_peft_model(unwrapped_model):
+            model_name = unwrapped_model.base_model.model._get_name()
+        else:
+            model_name = unwrapped_model._get_name()
+        # User-defined compute_loss function
+
+
+
+
+
         with torch.no_grad():
             if is_sagemaker_mp_enabled():
                 raw_outputs = smp_forward_only(model, inputs)
@@ -4510,24 +4593,43 @@ class Trainer:
                     logits = smp_nested_concat(logits_mb)
             else:
                 if has_labels or loss_without_labels:
-                    with self.compute_loss_context_manager():
-                        loss, outputs = self.compute_loss(model, inputs, return_outputs=True)
-                    loss = loss.mean().detach()
+                    if model_name in MODEL_FOR_CAUSAL_LM_MAPPING_NAMES.values():
+                        predictions = model.generate(**inputs, 
+                                                     pad_token_id=model.config.eos_token_id, 
+                                                     num_beams=5, 
+                                                     max_new_tokens=self.args.max_new_tokens)
+                        outputs = preds_to_output(predictions, self.processing_class, look_for=self.model.config.label2id) if not self.args.is_regression \
+                                    else preds_to_output_regression(predictions, self.processing_class)
+                        loss = None
+                    else: 
+                        with self.compute_loss_context_manager():
+                            loss, outputs = self.compute_loss(model, inputs, return_outputs=True)
+                        loss = loss.mean().detach()
+
 
                     if isinstance(outputs, dict):
-                        logits = tuple(v for k, v in outputs.items() if k not in ignore_keys + ["loss"])
+                        logits = tuple(v for k, v in outputs.items() if k not in ignore_keys + ["loss", "hidden_states"])
                     else:
                         logits = outputs[1:]
                 else:
-                    loss = None
-                    with self.compute_loss_context_manager():
-                        # outputs = model(**inputs)
-                        loss, logits, labels = self.model.generate(inputs)
-                        loss = loss[0]
-                    # if isinstance(outputs, dict):
-                    #     logits = tuple(v for k, v in outputs.items() if k not in ignore_keys)
-                    # else:
-                    #     logits = outputs
+                    if model_name in MODEL_FOR_CAUSAL_LM_MAPPING_NAMES.values():
+                        predictions = model.generate(**inputs, 
+                                                     pad_token_id=model.config.eos_token_id, 
+                                                     num_beams=5, 
+                                                     max_new_tokens=self.args.max_new_tokens)
+                        outputs = preds_to_output(predictions, self.processing_class, look_for=self.model.config.label2id) if not self.args.is_regression \
+                                    else preds_to_output_regression(predictions, self.processing_class)
+                        loss = None
+                    else: 
+                        loss = None
+                        with self.compute_loss_context_manager():
+                            outputs = model(**inputs)
+                        # TODO: use model generate, write decoding function to obtain label. 
+
+                    if isinstance(outputs, dict):
+                        logits = tuple(v for k, v in outputs.items() if k not in ignore_keys + ["loss", "hidden_states"])
+                    else:
+                        logits = outputs
                     # TODO: this needs to be fixed and made cleaner later.
                     if self.args.past_index >= 0:
                         self._past = outputs[self.args.past_index - 1]
@@ -4537,7 +4639,7 @@ class Trainer:
 
         logits = nested_detach(logits)
         if len(logits) == 1:
-            logits = logits[0]
+            logits = logits[0] # For logits we really don't care about other items
 
         return (loss, logits, labels)
 
@@ -5201,3 +5303,319 @@ class Trainer:
             num_items_in_batch = num_items_in_batch.item()
 
         return batch_samples, num_items_in_batch
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+class DistillTrainer(Trainer): 
+    def __init__(self, teacher, *args, **kwargs): 
+
+        self.teacher = teacher 
+
+
+        super().__init__(*args, **kwargs) 
+
+        if (
+            self.place_model_on_device
+            and not getattr(self.teacher, "quantization_method", None) == QuantizationMethod.BITS_AND_BYTES
+        ):
+            self._move_model_to_device(self.teacher, self.args.device)
+        
+        supported_classes = (PreTrainedModel,) if not is_peft_available() else (PreTrainedModel, PeftModel)
+        if not isinstance(self.model, supported_classes):
+            if isinstance(self.accelerator.unwrap_model(self.model), supported_classes):
+                maybe_peft = self.accelerator.unwrap_model(self.model)
+                if isinstance(maybe_peft, PeftModel): 
+                    unwrapped_base_model = deepcopy(maybe_peft).unload() 
+                    unwrapped_base_model.save_pretrained(self.args.output_dir)
+                elif isinstance(maybe_peft, PreTrainedModel): 
+                    pass # if self.model is already a pre-trained model, it is already saved with _save()
+        else: 
+            if isinstance(self.model, PeftModel): 
+                unwrapped_base_model = deepcopy(self.model).unload() 
+                unwrapped_base_model.save_pretrained(os.path.join(self.args.output_dir, "base_model"))
+            elif isinstance(self.model, PreTrainedModel): 
+                pass # if self.model is already a pre-trained model, it is already saved with _save()
+                # self.model.save_pretrained(best_tfmr_dir) 
+
+
+        self.reverse = self.args.reverse 
+        self.all_to_one = self.args.match_all_layers_to
+        self.random_shuffle = self.args.random_shuffle 
+
+        self.hidden_alpha = self.args.hidden_alpha 
+        self.kl_alpha = self.args.kl_alpha 
+        self.ce_alpha = self.args.ce_alpha 
+
+        self.layer_map = LAYER_MAPPING[self.teacher.config.num_hidden_layers][self.model.config.num_hidden_layers] 
+        self.state.mets = [("loss", None), ("ce_loss", None), ("kl_loss", None), ("hidden_loss", None)]
+
+        print("====== DISTILLATION SETTINGS ======")
+        if self.all_to_one is not None: 
+            self.layer_map = [self.all_to_one for _ in range(len(self.layer_map))]
+            print("\tMatching: All to teacher layer", self.all_to_one) 
+        if self.random_shuffle: 
+            self.layer_map = [self.layer_map[i] for i in list(torch.randperm(len(self.layer_map)))]
+            print("\tMatching: shuffle")
+        if self.reverse: 
+            self.layer_map = self.layer_map[::-1] 
+            print("\tMatching: reverse")
+        else: 
+            print("\tMatching: forward")
+        
+        print("\tLayer Mapping: ", self.layer_map) 
+
+        print("\n\n\n")
+
+
+
+
+
+    
+    def compute_loss(self, model, inputs, return_outputs=False, num_items_in_batch=None):
+        """
+        How the loss is computed by Trainer. By default, all models return the loss in the first element.
+
+        Subclass and override for custom behavior.
+        """
+        # if we define our own loss function, then labels will be pulled out of inputs and loss will be computed 
+        # separately
+        if (self.label_smoother is not None or self.compute_loss_func is not None) and "labels" in inputs:
+            labels = inputs.pop("labels")
+        else:
+            labels = None
+        if self.model_accepts_loss_kwargs:
+            loss_kwargs = {}
+            if num_items_in_batch is not None:
+                loss_kwargs["num_items_in_batch"] = num_items_in_batch
+            inputs = {**inputs, **loss_kwargs}
+
+
+        # CE LOSS
+        outputs = model(**inputs, output_hidden_states=True)
+        # Save past state if it exists
+        # TODO: this needs to be fixed and made cleaner later.
+        if self.args.past_index >= 0:
+            self._past = outputs[self.args.past_index]
+
+        if labels is not None:
+            unwrapped_model = self.accelerator.unwrap_model(model)
+            if _is_peft_model(unwrapped_model):
+                model_name = unwrapped_model.base_model.model._get_name()
+            else:
+                model_name = unwrapped_model._get_name()
+            # User-defined compute_loss function
+            if self.compute_loss_func is not None:
+                loss = self.compute_loss_func(outputs, labels, num_items_in_batch=num_items_in_batch)
+            elif model_name in MODEL_FOR_CAUSAL_LM_MAPPING_NAMES.values():
+                loss = self.label_smoother(outputs, labels, shift_labels=True)
+            else:
+                loss = self.label_smoother(outputs, labels)
+        else:
+            if isinstance(outputs, dict) and "loss" not in outputs:
+                raise ValueError(
+                    "The model did not return a loss from the inputs, only the following keys: "
+                    f"{','.join(outputs.keys())}. For reference, the inputs it received are {','.join(inputs.keys())}."
+                )
+            # We don't use .loss here since the model may return tuples instead of ModelOutput.
+            loss = outputs["loss"] if isinstance(outputs, dict) else outputs[0]
+
+
+        # DISTILLATION LOSSES 
+        if not self.control.should_evaluate:
+            with torch.no_grad(): 
+                t_outputs = self.teacher(**inputs, output_hidden_states=True)
+                t_hidden = t_outputs["hidden_states"]
+                t_logits = t_outputs["logits"]
+
+            kl_loss = self.kl_loss(t_logits, outputs["logits"]) if self.kl_alpha > 0. else torch.tensor(0)
+
+
+            t_hidden, s_hidden = self.select_hidden_states(t_hidden, outputs["hidden_states"], self.layer_map) 
+
+            hidden_loss = self.hidden_loss(t_hidden, s_hidden, inputs["attention_mask"]) \
+                if self.hidden_alpha > 0. else torch.tensor(0)
+
+
+            ce_loss = loss 
+            loss = self.kl_alpha * kl_loss + self.ce_alpha * ce_loss + self.hidden_alpha * hidden_loss
+
+            self.state.mets = [("loss", loss.item()), ("ce_loss", ce_loss.item()), ("kl_loss", kl_loss.item()), ("hidden_loss", hidden_loss.item())]
+        else: 
+            self.state.mets = [("loss", loss.item())]
+
+        if self.args.average_tokens_across_devices and self.model_accepts_loss_kwargs:
+            loss *= self.accelerator.num_processes
+
+
+        outputs["hidden_states"] = None
+
+
+        return (loss, outputs) if return_outputs else loss
+
+    
+    def kl_loss(self, p, q): 
+        """
+        p: target
+        q: input
+        """
+
+        inputs = F.log_softmax(q, dim=-1)
+        targets = F.softmax(p, dim=-1) 
+        kl_loss = nn.KLDivLoss(reduction="batchmean")
+        loss = kl_loss(inputs, targets) 
+        return loss
+
+
+    def hidden_loss(self, 
+                    teacher_states: List[torch.Tensor], 
+                    student_states: List[torch.Tensor], 
+                    attention_mask: torch.Tensor, 
+                    norm_hidden_states: Optional[bool] = True) -> torch.Tensor:  
+        """
+        mse loss
+        
+        teacher_states: Tuple(Tensor[batch_size, sequence_len, common_hidden_dim]) 
+        student_states: Tuple(Tensor[batch_size, sequence_len, common_hidden_dim]) 
+        attention_mask: Tensor[batch_size, sequence_len]
+        """
+        assert len(teacher_states) == len(student_states), "Number of teacher and student states do not match" 
+
+        if norm_hidden_states: 
+            teacher_states = [t / t.norm(dim=-1, keepdim=True) for t in teacher_states]
+            student_states = [s / s.norm(dim=-1, keepdim=True) for s in student_states]
+
+
+        diffs = [((t - s) * (t - s)).sum(dim=-1) for t, s in zip(teacher_states, student_states)]
+        valids = attention_mask.sum()
+        # normalized by the number of valids
+        normed_losses = [(l * attention_mask).mean(dim=0).sum()/valids for l in diffs]
+
+        reduction = 0 
+        for nl in normed_losses:
+            reduction += nl
+        reduction /= len(normed_losses)
+        
+        return reduction 
+
+    def select_hidden_states(self, 
+                             teacher_states: Tuple[torch.Tensor], 
+                             student_states: Tuple[torch.Tensor], 
+                             layer_mapping: List[int], 
+                             include_emb: Optional[bool] = False): 
+
+        if include_emb: 
+            l = [x + 1 for x in layer_mapping] 
+            l = [0] + l 
+        else: 
+            l = [x + 1 for x in layer_mapping] 
+
+        t_hidden = [teacher_states[i] for i in l] 
+
+        s_hidden = student_states if include_emb else student_states[1:] 
+        return t_hidden, s_hidden
+
+
+
+
+    def _maybe_log_save_evaluate(self, tr_loss, grad_norm, model, trial, epoch, ignore_keys_for_eval, start_time):
+        """
+        Only difference from parent class method is that for DistillTrainer, we save the
+        base student model as well.
+        """
+        if self.control.should_log and self.state.global_step > self._globalstep_last_logged:
+            if is_torch_xla_available():
+                xm.mark_step()
+
+            logs: Dict[str, float] = {}
+
+            # all_gather + mean() to get average loss over all processes
+            tr_loss_scalar = self._nested_gather(tr_loss).mean().item()
+
+            # reset tr_loss to zero
+            tr_loss -= tr_loss
+
+            logs["loss"] = round(tr_loss_scalar / (self.state.global_step - self._globalstep_last_logged), 4)
+            if grad_norm is not None:
+                logs["grad_norm"] = grad_norm.detach().item() if isinstance(grad_norm, torch.Tensor) else grad_norm
+            logs["learning_rate"] = self._get_learning_rate()
+
+            self._total_loss_scalar += tr_loss_scalar
+            self._globalstep_last_logged = self.state.global_step
+            self.store_flos()
+
+            self.log(logs, start_time)
+
+        metrics = None
+        if self.control.should_evaluate:
+            metrics = self._evaluate(trial, ignore_keys_for_eval)
+            is_new_best_metric = self._determine_best_metric(metrics=metrics, trial=trial)
+
+            if self.args.save_strategy == SaveStrategy.BEST:
+                self.control.should_save = is_new_best_metric
+            
+            ## override because I want to specify save format
+            ## TODO 
+            best_tfmr_dir = os.path.join(self.args.output_dir, "best_tfmr")
+            os.makedirs(best_tfmr_dir, exist_ok=True)
+            with open(os.path.join(best_tfmr_dir, "all_metrics.log"), "a") as f: 
+                f.write(f"Step {self.state.global_step} results:" + str(metrics) + "\n")
+            if is_new_best_metric: 
+                self._save(best_tfmr_dir)
+                # save base model
+                # supported_classes = (PreTrainedModel,) if not is_peft_available() else (PreTrainedModel, PeftModel)
+                # if not isinstance(self.model, supported_classes):
+                #     if isinstance(self.accelerator.unwrap_model(self.model), supported_classes):
+                #         maybe_peft = self.accelerator.unwrap_model(self.model)
+                #         if isinstance(maybe_peft, PeftModel): 
+                #             unwrapped_base_model = maybe_peft.unwrap() 
+                #             unwrapped_base_model.save_pretrained(best_tfmr_dir)
+                #         elif isinstance(maybe_peft, PreTrainedModel): 
+                #             pass
+                #             # maybe_peft.save_pretrained(best_tfmr_dir)
+                # else: 
+                #     if isinstance(self.model, PeftModel): 
+                #         unwrapped_base_model = self.model.unload() 
+                #         unwrapped_base_model.save_pretrained(best_tfmr_dir)
+                #     elif isinstance(self.model, PreTrainedModel): 
+                #         pass # if self.model is already a pre-trained model, it is already saved with _save()
+                #         # self.model.save_pretrained(best_tfmr_dir) 
+                with open(os.path.join(best_tfmr_dir, "best_metrics.log"), "a") as f: 
+                    f.write(f"Step {self.state.global_step} results:" + str(metrics) + "\n")
+
+        if self.control.should_save:
+            self._save_checkpoint(model, trial)
+            self.control = self.callback_handler.on_save(self.args, self.state, self.control)

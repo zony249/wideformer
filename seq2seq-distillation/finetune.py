@@ -14,11 +14,11 @@ from dataclasses import make_dataclass, replace, asdict
 import numpy as np
 import pytorch_lightning as pl
 import torch
-from callbacks import Seq2SeqLoggingCallback, get_checkpoint_callback, get_early_stopping_callback
+# from callbacks import get_checkpoint_callback, get_early_stopping_callback
 from torch import nn
 from torch.utils.data import DataLoader
 
-from transformers import MBartTokenizer, T5ForConditionalGeneration
+from transformers import MBartTokenizer, T5ForConditionalGeneration, Qwen2ForCausalLM
 from transformers.models.bart.modeling_bart import shift_tokens_right
 from transformers import HfArgumentParser
 from transformers import TrainingArguments
@@ -114,6 +114,10 @@ class SummarizationModule(BaseTransformer):
         elif self.decoder_start_token_id is None and isinstance(self.model, T5ForConditionalGeneration): 
              self.decoder_start_token_id = self.model.config.pad_token_id
              self.model.config.decoder_start_token_id = self.model.config.pad_token_id
+        elif self.decoder_start_token_id is None and isinstance(self.model, Qwen2ForCausalLM): 
+            self.decoder_start_token_id = self.model.config.pad_token_id
+            self.model.config.decoder_start_token_id = self.model.config.pad_token_id
+
 
         self.dataset_class = (
             LegacySeq2SeqDataset # Seq2SeqDataset if hasattr(self.tokenizer, "prepare_seq2seq_batch") else LegacySeq2SeqDataset
@@ -283,7 +287,7 @@ class SummarizationModule(BaseTransformer):
 
     def get_dataloader(self, type_path: str, batch_size: int, shuffle: bool = False) -> DataLoader:
         dataset = self.get_dataset(type_path)
-
+        # TODO: If model is Causal LM, we need to combine inputs and labels.
         if self.hparams.sortish_sampler and type_path != "test" and type_path != "val":
             sampler = dataset.make_sortish_sampler(batch_size, distributed=self.hparams.gpus > 1)
             return DataLoader(
@@ -398,6 +402,7 @@ class SummarizationModule(BaseTransformer):
                 " val_check_interval will effect it."
             ),
         )
+        parser.add_argument("--lora_adapter", type=str, default=None, help="Can either be None, random_init, or path to lora adapters")
         return parser
 
 
@@ -444,20 +449,14 @@ def main(args, hf_training_args, model=None) -> SummarizationModule:
 
         logger = WandbLogger(name=model.output_dir.name, project=f"hf_{dataset}")
 
-    if args.early_stopping_patience >= 0:
-        es_callback = get_early_stopping_callback(model.val_metric, args.early_stopping_patience)
-    else:
-        es_callback = False
 
     lower_is_better = args.val_metric == "loss"
     train_outputs: TrainOutput = generic_train(
         model,
         hf_training_args,
-        logging_callback=Seq2SeqLoggingCallback(),
-        checkpoint_callback=get_checkpoint_callback(
-            args.output_dir, model.val_metric, args.save_top_k, lower_is_better
-        ),
-        early_stopping_callback=es_callback,
+        logging_callback=None, 
+        checkpoint_callback=None,
+        early_stopping_callback=False,
         logger=logger,
     )
     pickle_save(model.hparams, model.output_dir / "hparams.pkl")
