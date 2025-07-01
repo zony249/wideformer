@@ -342,7 +342,11 @@ def preds_to_output(preds, tok, look_for: Dict[str, int]):
     for sent in preds_tok: 
         counts = {k:0 for k in look_for} 
         for item in look_for: 
-            counts[item] = sent.count(item) 
+            counts[item] = sent.split("\n")[-1].lower().count(item) 
+        # print(sent)
+        # print(sent.split("\n")[-1])
+        # print(counts)
+        # print(max(counts, key=counts.get))
         max_key = max(counts, key=counts.get)
         output.append(look_for[max_key])
     output = torch.tensor(output, device=preds.device)
@@ -350,6 +354,23 @@ def preds_to_output(preds, tok, look_for: Dict[str, int]):
     return {"loss": 0, "logits": output}
 
         
+def preds_to_output_regression(preds, tok): 
+    """
+    Converts decoded predictions (from generative model) into regression result.
+    """
+    preds_tok = tok.batch_decode(preds) 
+    output = []
+    for sent in preds_tok: 
+        search_area = sent.split("\n")[-1]
+        floats = re.findall(r"[-+]?(?:\d*\.*\d+)", search_area)
+        extracted = float(floats[-1]) 
+        if isinstance(extracted, float):
+            output.append([extracted])
+        else: 
+            output.append([0.0])
+
+    output = torch.tensor(output, device=preds.device)
+    return {"loss": 0, "logits": output}
 
 
 
@@ -3742,7 +3763,7 @@ class Trainer:
             model_name = unwrapped_model._get_name()
         # User-defined compute_loss function
         if model_name in MODEL_FOR_CAUSAL_LM_MAPPING_NAMES.values():
-            inputs["labels"] = inputs["input_ids"]
+            inputs["labels"] = inputs["input_ids"]#torch.cat([inputs["input_ids"][:, :-1], torch.ones_like(inputs["input_ids"][:, 0:1]) * self.processing_class.eos_token_id], axis=-1)
 
 
 
@@ -4569,8 +4590,12 @@ class Trainer:
             else:
                 if has_labels or loss_without_labels:
                     if model_name in MODEL_FOR_CAUSAL_LM_MAPPING_NAMES.values():
-                        predictions = model.generate(**inputs, pad_token_id=model.config.eos_token_id)
-                        outputs = preds_to_output(predictions, self.processing_class, look_for=self.model.config.label2id)
+                        predictions = model.generate(**inputs, 
+                                                     pad_token_id=model.config.eos_token_id, 
+                                                     num_beams=5, 
+                                                     max_new_tokens=self.args.max_new_tokens)
+                        outputs = preds_to_output(predictions, self.processing_class, look_for=self.model.config.label2id) if not self.args.is_regression \
+                                    else preds_to_output_regression(predictions, self.processing_class)
                         loss = None
                     else: 
                         with self.compute_loss_context_manager():
@@ -4583,13 +4608,22 @@ class Trainer:
                     else:
                         logits = outputs[1:]
                 else:
-                    loss = None
-                    with self.compute_loss_context_manager():
-                        outputs = model(**inputs)
+                    if model_name in MODEL_FOR_CAUSAL_LM_MAPPING_NAMES.values():
+                        predictions = model.generate(**inputs, 
+                                                     pad_token_id=model.config.eos_token_id, 
+                                                     num_beams=5, 
+                                                     max_new_tokens=self.args.max_new_tokens)
+                        outputs = preds_to_output(predictions, self.processing_class, look_for=self.model.config.label2id) if not self.args.is_regression \
+                                    else preds_to_output_regression(predictions, self.processing_class)
+                        loss = None
+                    else: 
+                        loss = None
+                        with self.compute_loss_context_manager():
+                            outputs = model(**inputs)
                         # TODO: use model generate, write decoding function to obtain label. 
 
                     if isinstance(outputs, dict):
-                        logits = tuple(v for k, v in outputs.items() if k not in ignore_keys)
+                        logits = tuple(v for k, v in outputs.items() if k not in ignore_keys + ["loss"])
                     else:
                         logits = outputs
                     # TODO: this needs to be fixed and made cleaner later.

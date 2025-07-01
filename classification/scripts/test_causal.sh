@@ -3,30 +3,32 @@
 #SBATCH --gpus-per-node=a100:4
 #SBATCH --mem=64G
 #SBATCH --cpus-per-task=6
-#SBATCH --time=3-00:00
+#SBATCH --time=7-00:00
 #SBATCH --account=rrg-lilimou
-#SBATCH --output=slurm-logs/slurm-%j-%n-causal-pretrained-prediction.out
+#SBATCH --output=slurm-logs/slurm-%j-%n-qqp-generative-prediction.out
 
 
-export CUDA_VISIBLE_DEVICES=0,2,3,4
+# export CUDA_VISIBLE_DEVICES=6,7
 export MODEL="deepseek-ai/DeepSeek-R1-Distill-Qwen-7B"
 # export MODEL="roberta-large"
-export TASK_NAME=mnli
-export LORA_ADAPTER="models/mnli-teacher/best_tfmr"
-export EXP_NAME=$(date +%y-%m-%d--%T)--finetune-predict
-export OUTPUT=runs/$EXP_NAME
-
+export TASK_NAME=qqp
+export EXP_NAME=$(date +%y-%m-%d--%T)--generative-predict
+export OUTPUT=$SCRATCH/wideformer/classification/runs/$EXP_NAME
+export NUM_GPUS=4
 
 mkdir -p $OUTPUT
 
 
+
 export START=$(date +%s)
 
+
+
 torchrun \
-  --nproc_per_node=4 \
+  --nproc_per_node=$NUM_GPUS \
   finetune.py \
     --model_name_or_path $MODEL \
-    --lora_adapter=$LORA_ADAPTER \
+    --use_causal_lm \
     --task_name $TASK_NAME \
     --cache_dir=glue_pretrained \
     --do_eval \
@@ -40,7 +42,7 @@ torchrun \
     --optim adamw_hf \
     --max_new_tokens=1024 \
     --seed $((RANDOM % 100000)) \
-    --overwrite_cache \
+   #  --overwrite_cache \
 
 
 if [[ $TASK_NAME == "mnli" ]]; then

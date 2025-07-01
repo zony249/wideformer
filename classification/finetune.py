@@ -42,6 +42,7 @@ from transformers import (
     default_data_collator,
     set_seed,
 )
+from modeling_qwen2 import Qwen2ForCausalLM
 from transformers.trainer_utils import get_last_checkpoint
 from transformers.utils import check_min_version, send_example_telemetry
 from transformers.utils.versions import require_version
@@ -59,6 +60,7 @@ from peft import (
 
 from trainer import Trainer, PrefixCollator
 import torch
+from torch import multiprocessing 
 
 # Will error if the minimal version of Transformers is not installed. Remove at your own risks.
 # check_min_version("4.49.0.dev0")
@@ -66,12 +68,16 @@ import torch
 def print_trainable_parameters(model):
     trainable_params = 0
     all_param = 0
+    # if multiprocessing.parent_process() is None:
+    #     print("running in a parent process")
+    # else: 
+    #     print("running in a child process")
     for _, param in model.named_parameters():
         all_param += param.numel()
         if param.requires_grad:
             trainable_params += param.numel()
     print(
-        f"trainable params: {trainable_params} || all params: {all_param} || trainable%: {100 * trainable_params / all_param:.2f}"
+        f"trainable params: {trainable_params} || all params: {all_param} || trainable%: {100 * trainable_params/all_param:.2f}"
     )
 
 require_version("datasets>=1.8.0", "To fix: pip install -r examples/pytorch/text-classification/requirements.txt")
@@ -89,10 +95,19 @@ task_to_keys = {
 }
 
 system_prompt = "A conversation between User and Assistant. The user asks a question, and the Assistant solves it. The assistant first thinks about the reasoning process in the mind and then provides the user with the answer. The reasoning process and answer are enclosed within <think> </think> and <answer> </answer> tags, respectively, i.e., <think> reasoning process here </think> <answer> answer here </answer>."
-
-
+special_tokens = {
+    "user": 151644, 
+    "assistant": 151645
+}
 task_to_prompt = {
-    "mnli": ("The relationship between a pair of sentences can be 'entailment', 'neutral', or 'contradiction'. For these two sentences: ", " What is the relationship?")
+    "cola": (" Respond in one word whether the given sentence is linguistically acceptable. If the sentence exhibits morphological, syntactic, or semantic violations, respond with \"unacceptable\", otherwise respond with \"acceptable\": ", "\nThe answer is: "), 
+    "mnli": (" Explain in one word whether the following pair of sentences exhibit logical \"entailment\", \"neutral\", or \"contradiction\": ", "\nThe relationship is: "), 
+    "mrpc": (" Respond in one word whether the following two sentences are equivalent or not. If they are equivalent, respond with \"equivalent\", otherwise respond with \"not_equivalent\": ", "\nThe answer is: "), 
+    "qnli" :(" Respond in one word for the following sentence pair, whether the first sentence logically entails the second. If it is a logical entailment, respond with \"entailment\", otherwise respond with \"not_entailment\": ", "\nThe answer is: "), 
+    "qqp" : (" Respond in one word whether the folling two questions are paraphrases of each other or not. If they paraphrase each other, then respond with \"duplicate\", and if they don't, respond with \"not_duplicate\".", "\nThe answer is: "),
+    "rte" : (" Respond in one word for the following sentence pair, whether the first sentence logically entails the second. If it is a logical entailment, respond with \"entailment\", otherwise respond with \"not_entailment\": ", "\nThe answer is: "), 
+    "sst2": (" Respond in one word for the following sentence, whether its sentiment is positive or negative. Respond with either \"positive\" or \"negative\": ", "\nThe answer is: "), 
+    "stsb": (" For the following sentence pair, respond with one number between 0 and 5 on how similar the two sentences are semantically, with 0 being completely dissimilar and 5 being semantically equivalent. Do not respond textually, i.e. respond with \"1\" instead of \"one\": ", "\nThe answer is: "), 
 }
 
 logger = logging.getLogger(__name__)
@@ -201,9 +216,9 @@ class ModelArguments:
     model_name_or_path: str = field(
         metadata={"help": "Path to pretrained model or model identifier from huggingface.co/models"}
     )
-    is_causal: bool = field(
+    use_causal_lm: bool = field(
         default=False, 
-        metadata={"help": "Whether the model is causal or non-causal"}
+        metadata={"help": "Whether to use CausalLM or SequenceClassification models"}
     )
     lora_adapter: Optional[str] = field(
         default=None, metadata={"help": 
@@ -257,13 +272,25 @@ class ModelArguments:
         metadata={"help": "Will enable to load a pretrained model whose head dimensions are different."},
     )
 
+@dataclass
+class CustomTrainingArguments(TrainingArguments): 
+    
+    max_new_tokens: Optional[int] = field(
+        default=1,
+        metadata={"help": "Under the causal generation setting, how many new tokens the model is allowed to generate."},
+    )
+    is_regression: Optional[bool] = field(
+        default=False, 
+        metadata={"help": "Whether the task is regression or not."}
+    )
+
 
 def main():
     # See all possible arguments in src/transformers/training_args.py
     # or by passing the --help flag to this script.
     # We now keep distinct sets of args, for a cleaner separation of concerns.
 
-    parser = HfArgumentParser((ModelArguments, DataTrainingArguments, TrainingArguments))
+    parser = HfArgumentParser((ModelArguments, DataTrainingArguments, CustomTrainingArguments))
     if len(sys.argv) == 2 and sys.argv[1].endswith(".json"):
         # If we pass only one argument to the script and it's the path to a json file,
         # let's parse it to get our arguments.
@@ -405,7 +432,7 @@ def main():
 
     # Labels
     if data_args.task_name is not None:
-        is_regression = data_args.task_name == "stsb"
+        is_regression = data_args.task_name in ["stsb"]
         if not is_regression:
             label_list = raw_datasets["train"].features["label"].names
             num_labels = len(label_list)
@@ -422,6 +449,8 @@ def main():
             label_list = raw_datasets["train"].unique("label")
             label_list.sort()  # Let's sort it for determinism
             num_labels = len(label_list)
+
+    training_args.is_regression = is_regression
 
     if training_args.bf16: 
         model_load_dtype = torch.bfloat16 
@@ -455,8 +484,8 @@ def main():
         trust_remote_code=model_args.trust_remote_code,
     )
 
-    if model_args.is_causal: 
-        model = AutoModelForCausalLM.from_pretrained(
+    if model_args.use_causal_lm: 
+        model = Qwen2ForCausalLM.from_pretrained(
             model_args.model_name_or_path,
             config=config,
             revision=model_args.model_revision,
@@ -487,8 +516,8 @@ def main():
                 init_lora_weights="gaussian", #"loftq", loftq_config=LoftQConfig(), 
                 lora_dropout=0.1, 
                 # target_modules=["query_proj", "key_proj"], 
-                task_type=TaskType.CAUSAL_LM if model_args.is_causal else TaskType.SEQ_CLS, 
-                modules_to_save= ["lm_head.weight"] if model_args.is_causal else ['classifier.bias', 'classifier.weight', 'pooler.dense.bias', 'pooler.dense.weight'],
+                task_type=TaskType.CAUSAL_LM if model_args.use_causal_lm else TaskType.SEQ_CLS, 
+                modules_to_save= ["lm_head.weight"] if model_args.use_causal_lm else ['classifier.bias', 'classifier.weight', 'pooler.dense.bias', 'pooler.dense.weight'],
             )
             model = get_peft_model(model, lora_config)
         else: 
@@ -565,13 +594,44 @@ def main():
         return result
 
     id2label = model.config.id2label
-    def preprocess_function_for_causal_model(examples):
+    def preprocess_function_for_causal_eval(examples):
         # Tokenize the texts
-        user = tokenizer.decode(151644)
-        examples[sentence1_key] = [system_prompt + user + task_to_prompt[data_args.task_name][0] + tokenizer.bos_token + ex for i, ex in enumerate(examples[sentence1_key])]
-        labels = [id2label[x] + "." if x >= 0  else "" for x in examples["label"]] 
+        user = tokenizer.decode(special_tokens["user"])
+        maybe_system_prompt = system_prompt if model_args.lora_adapter is None else ""
+        examples[sentence1_key] = [maybe_system_prompt + user + task_to_prompt[data_args.task_name][0] + tokenizer.bos_token + ex for i, ex in enumerate(examples[sentence1_key])]
         
-        asst = tokenizer.decode(151645) + tokenizer.decode(151648)
+        asst = tokenizer.decode(special_tokens["assistant"])
+
+        maybe_suffix = task_to_prompt[data_args.task_name][1] if len(task_to_prompt[data_args.task_name]) == 2 and model_args.lora_adapter is not None else "" 
+
+        if sentence2_key is not None and len(task_to_prompt[data_args.task_name]) == 2: 
+            examples[sentence2_key] = [ex + asst + maybe_suffix for i, ex in enumerate(examples[sentence2_key])]
+        elif len(task_to_prompt[data_args.task_name]) == 2: 
+            examples[sentence1_key] = [ex + asst + maybe_suffix for i, ex in enumerate(examples[sentence1_key])]
+        else: 
+            examples[sentence1_key] = [ex + asst for i, ex in enumerate(examples[sentence1_key])]
+
+        args = (
+            (examples[sentence1_key],) if sentence2_key is None else (examples[sentence1_key], examples[sentence2_key])
+        )
+        result = tokenizer(*args, padding=padding, max_length=max_seq_length, truncation=True)
+
+        # Map labels to IDs (not necessary for GLUE tasks)
+        if label_to_id is not None and "label" in examples:
+            result["label"] = [(label_to_id[l] if l != -1 else -1) for l in examples["label"]]
+        return result
+
+    def preprocess_function_for_causal_training(examples):
+        # Tokenize the texts
+        user = tokenizer.decode(special_tokens["user"])
+        maybe_system_prompt = system_prompt if model_args.lora_adapter is None else ""
+        examples[sentence1_key] = [maybe_system_prompt + user + task_to_prompt[data_args.task_name][0] + tokenizer.bos_token + ex for i, ex in enumerate(examples[sentence1_key])]
+        if data_args.task_name in ["stsb"]: 
+            labels = [f"{x:.3f}" + "." for x in examples["label"]]
+        else:
+            labels = [id2label[x] + "." if x >= 0  else "" for x in examples["label"]] 
+        
+        asst = tokenizer.decode(special_tokens["assistant"])
 
         if sentence2_key is not None and len(task_to_prompt[data_args.task_name]) == 2: 
             examples[sentence2_key] = [ex + asst + task_to_prompt[data_args.task_name][1] + labels[i] for i, ex in enumerate(examples[sentence2_key])]
@@ -591,12 +651,32 @@ def main():
         return result
 
     with training_args.main_process_first(desc="dataset map pre-processing"):
-        raw_datasets = raw_datasets.map(
-            preprocess_function if not model_args.is_causal else preprocess_function_for_causal_model,
+        # raw_datasets = raw_datasets.map(
+        #     preprocess_function if not model_args.is_causal else preprocess_function_for_causal_training,
+        #     batched=True,
+        #     load_from_cache_file=not data_args.overwrite_cache,
+        #     desc="Running tokenizer on dataset",
+        # )
+        raw_datasets["train"] = raw_datasets["train"].map(
+            preprocess_function if not model_args.use_causal_lm else preprocess_function_for_causal_training,
             batched=True,
             load_from_cache_file=not data_args.overwrite_cache,
             desc="Running tokenizer on dataset",
         )
+
+        if data_args.task_name == "mnli": 
+            val_names = ["validation_matched", "validation_mismatched", "test_matched", "test_mismatched"]
+        else: 
+            val_names = ["validation", "test"]
+
+        for v in val_names: 
+            raw_datasets[v] = raw_datasets[v].map(
+                preprocess_function if not model_args.use_causal_lm else preprocess_function_for_causal_eval,
+                batched=True,
+                load_from_cache_file=not data_args.overwrite_cache,
+                desc="Running tokenizer on dataset",
+            )
+
     if training_args.do_train:
         if "train" not in raw_datasets:
             raise ValueError("--do_train requires a train dataset")
