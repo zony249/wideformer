@@ -42,7 +42,7 @@ from transformers import (
 )
 from transformers.data.data_collator import DataCollatorMixin
 from transformers.trainer_callback import TrainerCallback
-from transformers.trainer_utils import EvalPrediction
+from transformers.trainer_utils import EvalPrediction, SaveStrategy
 from transformers.utils import is_peft_available
 
 from trl.data_utils import (
@@ -61,6 +61,8 @@ from trl.trainer.utils import (
     pad,
     peft_module_casting_to_bf16,
 )
+from transformers.utils import is_torch_xla_available
+from transformers.modeling_utils import unwrap_model
 
 
 if is_peft_available():
@@ -895,6 +897,75 @@ class SFTTrainer(Trainer):
             model_name = self.args.hub_model_id.split("/")[-1]
         self.create_model_card(model_name=model_name)
         super()._save_checkpoint(model, trial)
+    
+    def _maybe_log_save_evaluate(
+        self, tr_loss, grad_norm, model, trial, epoch, ignore_keys_for_eval, start_time, learning_rate=None
+    ):
+        """
+        Copied from trainer
+        """
+        if self.control.should_log and self.state.global_step > self._globalstep_last_logged:
+            if is_torch_xla_available():
+                xm.mark_step()
+
+            logs: dict[str, float] = {}
+
+            # all_gather + mean() to get average loss over all processes
+            tr_loss_scalar = self._nested_gather(tr_loss).mean().item()
+
+            # reset tr_loss to zero
+            tr_loss -= tr_loss
+
+            logs["loss"] = round(tr_loss_scalar / (self.state.global_step - self._globalstep_last_logged), 4)
+            if grad_norm is not None:
+                logs["grad_norm"] = grad_norm.item() if isinstance(grad_norm, torch.Tensor) else grad_norm
+            if learning_rate is not None:
+                logs["learning_rate"] = learning_rate
+            else:
+                logs["learning_rate"] = self._get_learning_rate()
+
+            self._total_loss_scalar += tr_loss_scalar
+            self._globalstep_last_logged = self.state.global_step
+            self.store_flos()
+
+            self.log(logs, start_time)
+
+        metrics = None
+        if self.control.should_evaluate:
+            metrics = self._evaluate(trial, ignore_keys_for_eval)
+            is_new_best_metric = self._determine_best_metric(metrics=metrics, trial=trial)
+
+            if self.args.save_strategy == SaveStrategy.BEST:
+                self.control.should_save = is_new_best_metric
+
+        best_path = os.path.join(self.args.output_dir, "best_tfmr")
+        all_mets = os.path.join(self.args.output_dir, "all_metrics.log")
+        best_mets = os.path.join(self.args.output_dir, "best_metrics.log")
+
+        self.log_metric(all_mets, metrics)
+
+        if self.control.should_save:
+            self._save_checkpoint(model, trial)
+            self.control = self.callback_handler.on_save(self.args, self.state, self.control)
+
+            # new code 
+            self.log_metric(best_mets, metrics)
+            if self.is_fsdp_enabled: 
+                self.model.save_pretrained(best_path, 
+                                        is_main_process=self.accelerator.is_main_process,
+                                        save_function=self.accelerator.save,
+                                        state_dict=self.accelerator.get_state_dict(self.model),)
+            else: 
+                unwrapped_model = self.accelerator.unwrap_model(self.model)
+                unwrapped_model.save_pretrained(best_path)
+                # raise NotImplementedError("Please implement saving without fsdp")
+
+    def log_metric(self, path, metrics): 
+        if metrics is None: 
+            return 
+        with open(path, "a") as f: 
+            f.write(",".join([f"{k}:{v}" for k, v in metrics.items()])) 
+            f.write("\n")
 
     def create_model_card(
         self,
