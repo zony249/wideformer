@@ -14,4 +14,8 @@ accelerate launch \
     finetune.py \
         --task=hellaswag \
         --base_model=Qwen/Qwen3-8B \
-        --output_dir=runs/$(date +%Y-%m-%d--%T)
+        --epochs=1 \
+        --batch_size=4 \
+        --output_dir=runs/$(date +%Y-%m-%d--%T) \
+        --force_load_local_dataset \
+        --local_dataset_dir=hellaswag_local \

@@ -27,11 +27,16 @@ if __name__ == "__main__":
     parser.add_argument("--eval_every_steps", type=int, default=25)
     parser.add_argument("--epochs", type=int, default=1)
     parser.add_argument("--batch_size", type=int, default=8)
+    parser.add_argument("--force_load_local_dataset", action="store_true")
+    parser.add_argument("--local_dataset_dir", type=str, default=None)
     args = parser.parse_args()
 
     # os.makedirs(args.output_dir)
 
-    datasets, formatting_func = get_dataset_and_task_processor(args.task, val_test_only=False)
+    datasets, formatting_func = get_dataset_and_task_processor(args.task, 
+                                                               val_test_only=False, 
+                                                               load_from_disk=args.force_load_local_dataset, 
+                                                               local_dataset_dir=args.local_dataset_dir)
 
     trainset = datasets["train"]
     eval_set = datasets["validation"]
@@ -60,7 +65,7 @@ if __name__ == "__main__":
     trainer_cfg = SFTConfig(
         output_dir=args.output_dir, 
         num_train_epochs=args.epochs, 
-        per_gpu_train_batch_size=args.batch_size,
+        per_device_train_batch_size=args.batch_size,
         eval_strategy="steps", 
         eval_steps=args.eval_every_steps, 
         save_steps=args.eval_every_steps)

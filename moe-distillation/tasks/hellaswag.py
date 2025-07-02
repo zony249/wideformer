@@ -5,18 +5,23 @@ import re
 
 import datasets
 from torch.utils.data import Dataset
-from datasets import load_dataset 
+from datasets import load_dataset, load_from_disk
 
 from .task_utils import AbstractTask
 
 class Hellaswag(AbstractTask): 
     name: str = "hellaswag" 
-    def __init__(self, split="train"): 
-        super().__init__(split=split)
+    def __init__(self, split="train", 
+                 load_local=False, 
+                 local_dir=None): 
+
+        super().__init__(split=split, 
+                         load_local=load_local, 
+                         local_dir=local_dir)
 
     def get_datasets(self, **dataset_kwargs) -> Dict[str, Dataset]: 
         """
-        For Hellaswag, we only look for the "split" kwarg from dataset_kwargs 
+        For Hellaswag, we look for the "split", "local_dir", and "load_from_disk" kwarg from dataset_kwargs 
         split: Union[List[str], str]
         """
         assert "split" in dataset_kwargs, f"dataset_kwargs missing argument 'split'"
@@ -24,13 +29,31 @@ class Hellaswag(AbstractTask):
         if isinstance(dataset_kwargs["split"], list):
             for spl in dataset_kwargs["split"]:
                 assert spl in ["train", "validation", "test"]
-                dataset = load_dataset("Rowan/hellaswag", split=spl)
+                dataset = self.load_data_split("Rowan/hellaswag", 
+                                               split=spl, 
+                                               load_local=dataset_kwargs["load_local"], 
+                                               local_dir=dataset_kwargs["local_dir"])
                 datasets[spl] = dataset
         else: 
             assert dataset_kwargs["split"] in ["train", "validation", "test"]
-            dataset = load_dataset("Rowan/hellaswag", split=dataset_kwargs["split"])
+            dataset = self.load_data_split("Rowan/hellaswag", 
+                                            split=dataset_kwargs["split"], 
+                                            load_local=dataset_kwargs["load_local"], 
+                                            local_dir=dataset_kwargs["local_dir"])
             datasets[dataset_kwargs["split"]] = dataset
         return datasets
+
+    def load_data_split(self, 
+                        name: str, 
+                        split:str, 
+                        load_local:Optional[bool]=False, 
+                        local_dir:Optional[str]=None) -> Dataset: 
+        if load_local: 
+            assert local_dir is not None, f"load_from_disk is set to {load_local}, however local_dir is None." 
+            dataset = load_from_disk(os.path.join(local_dir, split))
+        else: 
+            dataset = load_dataset(name, split=split)
+        return dataset
 
 
     def pre_process_fn(self, examples: List[Dict]) -> Any:
