@@ -14,6 +14,12 @@ from transformers import (
 )
 from sft_trainer import SFTConfig
 from data_utils import get_dataset_and_task_processor
+from models import (
+    ParallelModel,
+    Qwen3ForCausalLM
+)
+
+from model_utils import load_model
 
 
 if __name__ == "__main__": 
@@ -23,12 +29,13 @@ if __name__ == "__main__":
     parser.add_argument("--output_dir", type=str, default="runs")
     parser.add_argument("--base_model", type=str, required=True)
     parser.add_argument("--task", type=str, required=True, choices=["hellaswag"])
-    parser.add_argument("--lora_adapter", type=str, default=None, help="if specified, then the lora adapters would be loaded. Otherwise, randomly initialize")
+    parser.add_argument("--lora_adapter", type=str, default=None, help="\"random_init\", name of adapter, or None")
     parser.add_argument("--eval_every_steps", type=int, default=25)
     parser.add_argument("--epochs", type=int, default=1)
     parser.add_argument("--batch_size", type=int, default=8)
     parser.add_argument("--force_load_local_dataset", action="store_true")
     parser.add_argument("--local_dataset_dir", type=str, default=None)
+    parser.add_argument("--parallel_lanes", type=int, default=None)
     args = parser.parse_args()
 
     # os.makedirs(args.output_dir)
@@ -43,14 +50,12 @@ if __name__ == "__main__":
 
     # dataset = load_dataset("Rowan/hellaswag", split="train")
 
-    model = AutoModelForCausalLM.from_pretrained(args.base_model, 
-                                                torch_dtype=torch.bfloat16)
+    model, tok = load_model(args.base_model, torch_dtype=torch.bfloat16)
+    if args.parallel_lanes is not None: 
+        assert isinstance(model, ParallelModel), f"{args.base_model} is not a ParallelModel"
+        model.parallelize(args.parallel_lanes)
 
-    if args.lora_adapter is not None: 
-        pass
-        # load lora adapter for model 
-        raise NotImplementedError("need to implement loading finetuned LoRA adapter")
-    else: 
+    if args.lora_adapter == "random_init": 
         peft_config = LoraConfig(
             task_type=TaskType.CAUSAL_LM, 
             inference_mode=False, 
@@ -61,6 +66,9 @@ if __name__ == "__main__":
         )
         model = get_peft_model(model, peft_config)
         model.print_trainable_parameters()
+        # load lora adapter for model 
+    elif args.lora_adapter is not None: 
+        raise NotImplementedError("TODO: Implement loading trained adapters")
 
     trainer_cfg = SFTConfig(
         output_dir=args.output_dir, 
@@ -71,6 +79,7 @@ if __name__ == "__main__":
         save_steps=args.eval_every_steps)
 
     trainer = SFTTrainer(model=model, 
+                         processing_class=tok,
                          args=trainer_cfg, 
                          train_dataset=trainset,
                          eval_dataset=eval_set,  
