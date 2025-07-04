@@ -76,7 +76,10 @@ if __name__ == "__main__":
         per_device_train_batch_size=args.batch_size,
         eval_strategy="steps", 
         eval_steps=args.eval_every_steps, 
-        save_steps=args.eval_every_steps)
+        save_steps=args.eval_every_steps, 
+        save_strategy="best", 
+        metric_for_best_model="eval_loss")
+
 
     trainer = SFTTrainer(model=model, 
                          processing_class=tok,

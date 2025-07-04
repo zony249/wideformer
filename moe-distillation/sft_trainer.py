@@ -945,7 +945,7 @@ class SFTTrainer(Trainer):
         self.log_metric(all_mets, metrics)
 
         if self.control.should_save:
-            self._save_checkpoint(model, trial)
+            # self._save_checkpoint(model, trial)
             self.control = self.callback_handler.on_save(self.args, self.state, self.control)
 
             # new code 
@@ -964,6 +964,7 @@ class SFTTrainer(Trainer):
         if metrics is None: 
             return 
         with open(path, "a") as f: 
+            f.write(f"global_step:{self.state.global_step},")
             f.write(",".join([f"{k}:{v}" for k, v in metrics.items()])) 
             f.write("\n")
 
