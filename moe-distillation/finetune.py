@@ -53,13 +53,14 @@ if __name__ == "__main__":
     model, tok = load_model(args.base_model, torch_dtype=torch.bfloat16)
     if args.parallel_lanes is not None: 
         assert isinstance(model, ParallelModel), f"{args.base_model} is not a ParallelModel"
+        print(f"=== PARALLEL LANES: {args.parallel_lanes} ===")
         model.parallelize(args.parallel_lanes)
 
     if args.lora_adapter == "random_init": 
         peft_config = LoraConfig(
             task_type=TaskType.CAUSAL_LM, 
             inference_mode=False, 
-            r=8, 
+            r=32, 
             lora_alpha=32, 
             lora_dropout=0.1, 
             target_modules = "all-linear"
