@@ -1036,7 +1036,7 @@ class SFTTrainer(Trainer):
 ###### DISTILLATION CODE ######
 from accelerate import infer_auto_device_map, dispatch_model
 from models import ParallelModel
-from models.modeling_qwen3 import (
+from models.parallel_models.modeling_qwen3 import (
     Qwen3ModelParallelBlock, 
     Qwen3DecoderLayer
 )
@@ -1087,6 +1087,9 @@ class DistillTrainer(SFTTrainer):
         (loss, outputs) = super().compute_loss(
             model, inputs, return_outputs=True, num_items_in_batch=num_items_in_batch
         )
+
+        teacher_outputs = self.teacher(**inputs, output_hidden_states=True)
+
 
         if self.kl_alpha > 0: 
             pass 
