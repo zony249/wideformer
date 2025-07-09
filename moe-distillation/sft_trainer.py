@@ -1018,3 +1018,94 @@ class SFTTrainer(Trainer):
         )
 
         model_card.save(os.path.join(self.args.output_dir, "README.md"))
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+###### DISTILLATION CODE ######
+from accelerate import infer_auto_device_map, dispatch_model
+from models import ParallelModel
+from models.modeling_qwen3 import (
+    Qwen3ModelParallelBlock, 
+    Qwen3DecoderLayer
+)
+
+NO_SPLIT_MODULE_CLASSES = {
+    "qwen3": Qwen3DecoderLayer
+}
+
+
+NO_SPLIT_MODULE_CLASSES_PARALLEL = {
+    "qwen3": Qwen3ModelParallelBlock
+}
+
+
+class DistillTrainer(SFTTrainer): 
+    def __init__(self, 
+                 teacher: PreTrainedModel, 
+                 teacher_tokenizer: Optional[PreTrainedTokenizerBase] = None, 
+                 ce_alpha = 1.0, 
+                 kl_alpha = 1.0, 
+                 hidden_alpha = 3.0, 
+                 matching_location = "last", 
+                 **kwargs):
+        super().__init__(**kwargs) 
+        self.teacher = teacher 
+        self.tok_t = teacher_tokenizer if teacher_tokenizer is not None else self.processing_class
+
+        self.teacher.eval() 
+
+        if isinstance(teacher, ParallelModel):
+            no_split = NO_SPLIT_MODULE_CLASSES_PARALLEL[self.teacher.config.model_type]
+        else: 
+            no_split = NO_SPLIT_MODULE_CLASSES[self.teacher.config.model_type]
+
+        device_map = infer_auto_device_map(self.teacher, no_split_module_classes=no_split)
+        self.teacher = dispatch_model(self.teacher, device_map)
+
+        self.ce_alpha = ce_alpha
+        self.kl_alpha = kl_alpha 
+        self.hidden_alpha = hidden_alpha
+        self.matching_location = matching_location
+
+    def compute_loss(self, model, inputs, return_outputs=False, num_items_in_batch=None):
+        """
+        Compute training loss and additionally compute token accuracies
+        """
+        mode = "train" if self.model.training else "eval"
+        (loss, outputs) = super().compute_loss(
+            model, inputs, return_outputs=True, num_items_in_batch=num_items_in_batch
+        )
+
+        if self.kl_alpha > 0: 
+            pass 
+            # TODO
+            kl_loss = 0
+        
+        if self.hidden_alpha > 0: 
+            if self.matching_location == "last": 
+                pass 
+                # TODO
+            else: 
+                raise NotImplementedError(f"Hidden state matching has not been implemented for matching location {self.matching_location}")
+            pass
+        
+        #TODO: remove
+        hidden_loss = 0
+
+        final_loss = self.ce_alpha * loss \
+            + self.kl_alpha * kl_loss \
+            + self.hidden_alpha * hidden_loss 
+
+        return (final_loss, outputs) if return_outputs else final_loss
