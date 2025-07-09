@@ -41,7 +41,7 @@ import sys
 from accelerate import dispatch_model
 
 from models.parallel_models.modeling_qwen3 import Qwen3ForCausalLMParallel
-
+from transformers.modeling_utils import load_sharded_checkpoint
 
 if TYPE_CHECKING:
     from transformers.quantizers import AutoQuantizationConfig
@@ -612,16 +612,19 @@ class HFLM(TemplateLM):
                         model_kwargs["bnb_4bit_compute_dtype"] = get_dtype(
                             model_kwargs["bnb_4bit_compute_dtype"]
                         )
-            config = AutoConfig.from_pretrained(pretrained, **model_kwargs)
+            config = AutoConfig.from_pretrained(pretrained, 
+                                                torch_dtype=get_dtype(dtype), 
+                                                **model_kwargs)
             if config.model_type == "qwen3": 
                 self._model = Qwen3ForCausalLMParallel(config)
-                if parallel_lanes is not None: 
+                if parallel_lanes is not None:
                     self._model.parallelize(parallel_lanes)
-                self._model.from_pretrained(pretrained, **model_kwargs)
-                #TODO: Dispatching to GPU
+                    # self._model.from_pretrained(pretrained, trust_remote_code=True)
+                self._model.load_from_disk(pretrained)
                 self._model = dispatch_model(self._model, device_map=accelerate_args["device_map"])
             else: 
-                self._model = self.AUTO_MODEL_CLASS.from_pretrained(
+                # self._model = self.AUTO_MODEL_CLASS.from_pretrained(
+                self._model = Qwen3ForCausalLMParallel.from_pretrained(
                     pretrained,
                     revision=revision,
                     torch_dtype=get_dtype(dtype),
