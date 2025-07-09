@@ -1,9 +1,9 @@
-from .modeling_qwen3 import (
+from parallel_models.modeling_qwen3 import (
     Qwen3Model, 
     Qwen3ModelParallel, 
     Qwen3ForCausalLM, 
     Qwen3ForCausalLMParallel
 )
-from .parallel import (
+from parallel_models.parallel import (
     ParallelModel
 )
