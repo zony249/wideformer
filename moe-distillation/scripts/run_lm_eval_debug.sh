@@ -16,14 +16,13 @@ export HEAD_NODE_PORT=34568 # choose a port on the main node to start accelerate
 
 # export HF_DATASETS_OFFLINE=1
 export HF_HOME=~/large-file-storage
-export CUDA_VISIBLE_DEVICES=3
+export CUDA_VISIBLE_DEVICES=6
 export NUM_PROCESSES=$(echo $CUDA_VISIBLE_DEVICES | tr ',' '\n' | wc -l)
 
-accelerate launch \
-    --num_processes=$NUM_PROCESSES \
+python -m debugpy --listen 5678 \
     -m lm_eval \
         --model hf \
-        --model_args pretrained="runs/Qwen3-0.6B-finetuned-hellaswag",parallelize=False,dtype=bfloat16,trust_remote_code=true \
+        --model_args pretrained="Qwen/Qwen3-0.6B",parallelize=False,dtype=bfloat16,trust_remote_code=true \
         --tasks hellaswag\
         --batch_size 16 \
         --output_path runs/lm_eval \
