@@ -7,7 +7,7 @@ from peft import get_peft_model, LoraConfig, TaskType
 
 import torch
 from datasets import load_dataset
-from sft_trainer import SFTTrainer
+from sft_trainer import SFTTrainer, DistillTrainer
 from transformers import (
     AutoModelForCausalLM, 
     AutoTokenizer
@@ -24,7 +24,7 @@ from model_utils import load_model
 
 if __name__ == "__main__": 
 
-
+    # Finetune args
     parser = ArgumentParser("finetune.py")
     parser.add_argument("--output_dir", type=str, default="runs")
     parser.add_argument("--base_model", type=str, required=True)
@@ -36,6 +36,14 @@ if __name__ == "__main__":
     parser.add_argument("--force_load_local_dataset", action="store_true")
     parser.add_argument("--local_dataset_dir", type=str, default=None)
     parser.add_argument("--parallel_lanes", type=int, default=None)
+
+    # Distillation args
+    parser.add_argument("--teacher_model", type=str, required=True)
+    parser.add_argument("--ce_alpha", type=float, default=1.0)
+    parser.add_argument("--kl_alpha", type=float, default=1.0)
+    parser.add_argument("--hidden_alpha", type=float, default=3.0)
+    parser.add_argument("--matching_location", type=str, default="last", choices=["last"])
+
     args = parser.parse_args()
 
     # os.makedirs(args.output_dir)
@@ -49,6 +57,7 @@ if __name__ == "__main__":
     eval_set = datasets["validation"]
 
     model, tok = load_model(args.base_model, torch_dtype=torch.bfloat16)
+    teacher_model, teacher_tok = load_model(args.teacher_model, torch_dtype=torch.bfloat16)
 
     # Parallelize model if needed
     if args.parallel_lanes is not None: 
@@ -84,10 +93,15 @@ if __name__ == "__main__":
         metric_for_best_model="eval_loss")
 
 
-    trainer = SFTTrainer(model=model, 
+    trainer = DistillTrainer(model=model, 
                          processing_class=tok,
+                         teacher=teacher_model,
                          args=trainer_cfg, 
                          train_dataset=trainset,
                          eval_dataset=eval_set,  
-                         formatting_func=formatting_func)
+                         formatting_func=formatting_func, 
+                         ce_alpha=args.ce_alpha, 
+                         kl_alpha=args.kl_alpha, 
+                         hidden_alpha=args.hidden_alpha, 
+                         matching_location=args.matching_location)
     trainer.train()
