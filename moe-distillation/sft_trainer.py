@@ -1088,8 +1088,13 @@ class DistillTrainer(SFTTrainer):
         self.hidden_alpha = hidden_alpha
         self.matching_location = matching_location
 
-        self.adapters = nn.ModuleList([nn.Linear(self.model.config.hidden_size, self.teacher.config.hidden_size) for _ in range(4)])
-        self.optimizer.param_groups.append(self.adapters)
+        self.adapters = nn.ModuleList([nn.Linear(self.model.config.hidden_size, self.teacher.config.hidden_size) for _ in range(4)]).to(self.model.device)
+
+    def create_optimizer(self): 
+        super().create_optimizer() 
+        self.optimizer.add_param_group({"params": self.adapters.parameters(), "lr": 2e-5})
+
+
 
     def compute_loss(self, model, inputs, return_outputs=False, num_items_in_batch=None):
         """
@@ -1100,7 +1105,8 @@ class DistillTrainer(SFTTrainer):
             model, inputs, return_outputs=True, num_items_in_batch=num_items_in_batch
         )
         teacher_inputs = {k: v.to(self.teacher.device) for k, v in inputs.items()}
-        teacher_outputs = self.teacher(**teacher_inputs, output_hidden_states=True)
+        with torch.no_grad():
+            teacher_outputs = self.teacher(**teacher_inputs, output_hidden_states=True)
 
         teacher_logits = teacher_outputs["logits"]
         student_logits = outputs["logits"]
@@ -1121,37 +1127,37 @@ class DistillTrainer(SFTTrainer):
                 pass
                 # TODO
                 teacher_hidden, student_hidden = self.select_striped_hidden(teacher_hidden, student_hidden)
-                student_hidden = [l(s) for l, s in zip(self.adapters, student_hidden)]
+                student_hidden = [l(s.to(self.model.device)) for l, s in zip(self.adapters, student_hidden)]
                 hidden_loss = self.hidden_loss(teacher_hidden, student_hidden, inputs["attention_mask"])
             else: 
                 raise NotImplementedError(f"Hidden state matching has not been implemented for matching location {self.matching_location}")
             pass
         
-        #TODO: remove
-        hidden_loss = 0
 
-        final_loss = self.ce_alpha * loss \
+        final_loss = self.ce_alpha * loss.to(self.model.device) \
             + self.kl_alpha * kl_loss \
             + self.hidden_alpha * hidden_loss 
+        
+        final_loss = final_loss.to(self.model.device)
 
         return (final_loss, outputs) if return_outputs else final_loss
 
     def kl_loss(self, t, s, attention_mask): 
 
-        t = F.softmax(t, dim=-1)
-        s = F.log_softmax(s, dim=-1)
+        t = F.softmax(t, dim=-1).to(self.model.device)
+        s = F.log_softmax(s, dim=-1).to(self.model.device)
         loss = F.kl_div(s, t, reduction="none")
-        valid = attention_mask.sum() 
-        total = attention_mask.numel() 
-        return loss.sum(dim=(-2, -1)).mean() * valid / total
+        valid = attention_mask.sum().to(self.model.device)
+        total = attention_mask.numel()
+        return loss.sum(dim=(-1)).mean() * valid / total
 
     def hidden_loss(self, t, s, attention_mask, normalize_hidden=True): 
 
-        valids = attention_mask.sum() 
+        valids = attention_mask.sum().to(self.model.device)
         totals = attention_mask.numel()
 
-        t = torch.stack(t, dim=0)
-        s = torch.stack(s, dim=0)
+        t = torch.stack(t, dim=0).to(self.model.device)
+        s = torch.stack(s, dim=0).to(self.model.device)
 
         if normalize_hidden: 
             t = t / t.norm(dim=-1, keepdim=True)

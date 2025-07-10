@@ -12,12 +12,12 @@ from models import (
 )
 
 
-def load_model(hf_name_or_path: str, 
+def load_model(hf_name_or_path: str, parallel=True,
                **kwargs) -> Tuple[PreTrainedModel, PreTrainedTokenizerBase]: 
     config = AutoConfig.from_pretrained(hf_name_or_path, **kwargs) 
     tok = AutoTokenizer.from_pretrained(hf_name_or_path) 
     
-    if config.model_type == "qwen3": 
+    if config.model_type == "qwen3" and parallel: 
         model = Qwen3ForCausalLMParallel.from_pretrained(hf_name_or_path, config=config, **kwargs)
     else: 
         model = AutoModelForCausalLM.from_pretrained(hf_name_or_path, config=config, **kwargs)

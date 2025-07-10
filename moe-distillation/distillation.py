@@ -57,7 +57,7 @@ if __name__ == "__main__":
     eval_set = datasets["validation"]
 
     model, tok = load_model(args.base_model, torch_dtype=torch.bfloat16)
-    teacher_model, teacher_tok = load_model(args.teacher_model, torch_dtype=torch.bfloat16)
+    teacher_model, teacher_tok = load_model(args.teacher_model, parallel=False, torch_dtype=torch.bfloat16)
 
     # Parallelize model if needed
     if args.parallel_lanes is not None: 

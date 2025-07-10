@@ -1,15 +1,16 @@
 from transformers import AutoTokenizer, AutoConfig
 from models import Qwen3ForCausalLM, Qwen3ModelParallel, Qwen3ForCausalLMParallel
+import torch
 
-device=0
+device=5
 
-config = AutoConfig.from_pretrained("Qwen/Qwen3-0.6B")
+config = AutoConfig.from_pretrained("Qwen/Qwen3-8B")
 model = Qwen3ForCausalLMParallel(config).to(f"cuda:{device}")
 
-model.parallelize(4)
-tok = AutoTokenizer.from_pretrained("Qwen/Qwen3-0.6B") 
+# model.parallelize(4)
+tok = AutoTokenizer.from_pretrained("Qwen/Qwen3-8B") 
 
-model.load_from_disk("runs/Qwen3-hellaswag-parallel")
+model = model.from_pretrained("Qwen/Qwen3-8B", torch_dtype=torch.bfloat16)
 
 
 
