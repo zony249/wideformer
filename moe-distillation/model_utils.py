@@ -18,9 +18,9 @@ def load_model(hf_name_or_path: str,
     tok = AutoTokenizer.from_pretrained(hf_name_or_path) 
     
     if config.model_type == "qwen3": 
-        model = Qwen3ForCausalLMParallel.from_pretrained(hf_name_or_path, config=config)
+        model = Qwen3ForCausalLMParallel.from_pretrained(hf_name_or_path, config=config, **kwargs)
     else: 
-        model = AutoModelForCausalLM.from_pretrained(hf_name_or_path, config=config)
+        model = AutoModelForCausalLM.from_pretrained(hf_name_or_path, config=config, **kwargs)
 
     return model, tok
 

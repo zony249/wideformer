@@ -1034,6 +1034,7 @@ class SFTTrainer(Trainer):
 
 
 ###### DISTILLATION CODE ######
+from torch.nn import functional as F
 from accelerate import infer_auto_device_map, dispatch_model
 from models import ParallelModel
 from models.parallel_models.modeling_qwen3 import (
@@ -1051,6 +1052,14 @@ NO_SPLIT_MODULE_CLASSES_PARALLEL = {
 }
 
 
+STRIPED_MAPPING = {
+    35 : (3, 7), 
+    26 : (2, 5), 
+    17 : (1, 3), 
+    8 : (0, 1)
+}
+
+
 class DistillTrainer(SFTTrainer): 
     def __init__(self, 
                  teacher: PreTrainedModel, 
@@ -1058,7 +1067,7 @@ class DistillTrainer(SFTTrainer):
                  ce_alpha = 1.0, 
                  kl_alpha = 1.0, 
                  hidden_alpha = 3.0, 
-                 matching_location = "last", 
+                 matching_location = "striped", 
                  **kwargs):
         super().__init__(**kwargs) 
         self.teacher = teacher 
@@ -1079,6 +1088,9 @@ class DistillTrainer(SFTTrainer):
         self.hidden_alpha = hidden_alpha
         self.matching_location = matching_location
 
+        self.adapters = nn.ModuleList([nn.Linear(self.model.config.hidden_size, self.teacher.config.hidden_size) for _ in range(4)])
+        self.optimizer.param_groups.append(self.adapters)
+
     def compute_loss(self, model, inputs, return_outputs=False, num_items_in_batch=None):
         """
         Compute training loss and additionally compute token accuracies
@@ -1087,19 +1099,30 @@ class DistillTrainer(SFTTrainer):
         (loss, outputs) = super().compute_loss(
             model, inputs, return_outputs=True, num_items_in_batch=num_items_in_batch
         )
+        teacher_inputs = {k: v.to(self.teacher.device) for k, v in inputs.items()}
+        teacher_outputs = self.teacher(**teacher_inputs, output_hidden_states=True)
 
-        teacher_outputs = self.teacher(**inputs, output_hidden_states=True)
+        teacher_logits = teacher_outputs["logits"]
+        student_logits = outputs["logits"]
 
+        teacher_hidden = teacher_outputs["hidden_states"]
+        student_hidden = self.model(**inputs, output_hidden_states=True).hidden_states
 
         if self.kl_alpha > 0: 
             pass 
             # TODO
-            kl_loss = 0
+            kl_loss = self.kl_loss(teacher_logits, student_logits, inputs["attention_mask"])
         
         if self.hidden_alpha > 0: 
             if self.matching_location == "last": 
                 pass 
                 # TODO
+            elif self.matching_location == "striped": 
+                pass
+                # TODO
+                teacher_hidden, student_hidden = self.select_striped_hidden(teacher_hidden, student_hidden)
+                student_hidden = [l(s) for l, s in zip(self.adapters, student_hidden)]
+                hidden_loss = self.hidden_loss(teacher_hidden, student_hidden, inputs["attention_mask"])
             else: 
                 raise NotImplementedError(f"Hidden state matching has not been implemented for matching location {self.matching_location}")
             pass
@@ -1112,3 +1135,40 @@ class DistillTrainer(SFTTrainer):
             + self.hidden_alpha * hidden_loss 
 
         return (final_loss, outputs) if return_outputs else final_loss
+
+    def kl_loss(self, t, s, attention_mask): 
+
+        t = F.softmax(t, dim=-1)
+        s = F.log_softmax(s, dim=-1)
+        loss = F.kl_div(s, t, reduction="none")
+        valid = attention_mask.sum() 
+        total = attention_mask.numel() 
+        return loss.sum(dim=(-2, -1)).mean() * valid / total
+
+    def hidden_loss(self, t, s, attention_mask, normalize_hidden=True): 
+
+        valids = attention_mask.sum() 
+        totals = attention_mask.numel()
+
+        t = torch.stack(t, dim=0)
+        s = torch.stack(s, dim=0)
+
+        if normalize_hidden: 
+            t = t / t.norm(dim=-1, keepdim=True)
+            s = s / s.norm(dim=-1, keepdim=True) 
+        
+        loss = (t - s)**2 
+        loss = loss.sum(dim=-1).mean() * valids / totals 
+        return loss
+
+    def select_striped_hidden(self, t, s): 
+
+        teacher_layer_ids = STRIPED_MAPPING.keys() 
+        teacher_hidden_states = [] 
+        student_hidden_states = []
+        for k in teacher_layer_ids: 
+            module = STRIPED_MAPPING[k][0]
+            layer = STRIPED_MAPPING[k][1]
+            teacher_hidden_states.append(t[k+1]) 
+            student_hidden_states.append(s[module][layer])
+        return teacher_hidden_states, student_hidden_states

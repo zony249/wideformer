@@ -42,7 +42,7 @@ if __name__ == "__main__":
     parser.add_argument("--ce_alpha", type=float, default=1.0)
     parser.add_argument("--kl_alpha", type=float, default=1.0)
     parser.add_argument("--hidden_alpha", type=float, default=3.0)
-    parser.add_argument("--matching_location", type=str, default="last", choices=["last"])
+    parser.add_argument("--matching_location", type=str, default="striped", choices=["last", "striped"])
 
     args = parser.parse_args()
 
