@@ -19,7 +19,7 @@ from models import (
     Qwen3ForCausalLM
 )
 
-from model_utils import load_model
+from model_utils import load_model, create_student_from_teacher
 
 
 if __name__ == "__main__": 
@@ -28,11 +28,13 @@ if __name__ == "__main__":
     parser = ArgumentParser("finetune.py")
     parser.add_argument("--output_dir", type=str, default="runs")
     parser.add_argument("--base_model", type=str, required=True)
-    parser.add_argument("--task", type=str, required=True, choices=["hellaswag"])
+    parser.add_argument("--task", type=str, required=True, choices=["hellaswag", "wikitext"])
     parser.add_argument("--lora_adapter", type=str, default=None, help="\"random_init\", name of adapter, or None")
     parser.add_argument("--eval_every_steps", type=int, default=25)
     parser.add_argument("--epochs", type=int, default=1)
     parser.add_argument("--batch_size", type=int, default=8)
+    parser.add_argument("--lr", type=float, default=2e-5)
+    parser.add_argument("--gradient_accumulation_steps", type=int, default=1)
     parser.add_argument("--force_load_local_dataset", action="store_true")
     parser.add_argument("--local_dataset_dir", type=str, default=None)
     parser.add_argument("--parallel_lanes", type=int, default=None)
@@ -42,7 +44,7 @@ if __name__ == "__main__":
     parser.add_argument("--ce_alpha", type=float, default=1.0)
     parser.add_argument("--kl_alpha", type=float, default=1.0)
     parser.add_argument("--hidden_alpha", type=float, default=3.0)
-    parser.add_argument("--matching_location", type=str, default="striped", choices=["last", "striped"])
+    parser.add_argument("--matching_location", type=str, default="striped", choices=["last", "striped", "forward"])
 
     args = parser.parse_args()
 
@@ -56,7 +58,11 @@ if __name__ == "__main__":
     trainset = datasets["train"]
     eval_set = datasets["validation"]
 
-    model, tok = load_model(args.base_model, torch_dtype=torch.bfloat16)
+    if args.base_model == "weight_copy" or args.base_model == "random_init": 
+        model, tok = create_student_from_teacher(args.teacher_model, mode=args.base_model)
+    else: 
+        model, tok = load_model(args.base_model, torch_dtype=torch.bfloat16)
+
     teacher_model, teacher_tok = load_model(args.teacher_model, parallel=False, torch_dtype=torch.bfloat16)
 
     # Parallelize model if needed
@@ -86,9 +92,12 @@ if __name__ == "__main__":
         output_dir=args.output_dir, 
         num_train_epochs=args.epochs, 
         per_device_train_batch_size=args.batch_size,
+        per_device_eval_batch_size=args.batch_size, 
+        learning_rate=args.lr, 
         eval_strategy="steps", 
         eval_steps=args.eval_every_steps, 
         save_steps=args.eval_every_steps, 
+        gradient_accumulation_steps=args.gradient_accumulation_steps, 
         save_strategy="best", 
         metric_for_best_model="eval_loss")
 

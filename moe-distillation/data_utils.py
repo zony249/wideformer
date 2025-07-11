@@ -6,10 +6,14 @@ from typing import Tuple, List, Union, Optional
 import torch 
 from torch.utils.data import Dataset
 from datasets import load_dataset 
-from tasks import Hellaswag
+from tasks import (
+    Hellaswag, 
+    WikiText
+)
 
 TASK_MAP = { 
-    "hellaswag": Hellaswag
+    "hellaswag": Hellaswag, 
+    "wikitext" : WikiText
 }
 
 def get_dataset_and_task_processor(task_name: str, 
@@ -25,6 +29,12 @@ def get_dataset_and_task_processor(task_name: str,
         task = TASK_MAP[task_name](split=split, 
                                    load_local=load_from_disk, 
                                    local_dir=local_dataset_dir) 
+    elif task_name == "wikitext": 
+        split = ["validation", "test"] 
+        split = split + ["train"] if not val_test_only else split
+        task = TASK_MAP[task_name](splits=split, 
+                                   load_local=load_from_disk, 
+                                   local_dir=local_dataset_dir)
     else: 
         raise NotImplementedError
     return task.datasets, task.pre_process_fn

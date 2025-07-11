@@ -823,14 +823,25 @@ class SFTTrainer(Trainer):
                 "assistant_masks",
             ]
 
-    def compute_loss(self, model, inputs, return_outputs=False, num_items_in_batch=None):
+    def compute_loss(self, model, inputs, return_outputs=False, num_items_in_batch=None, output_hidden_states=False):
         """
         Compute training loss and additionally compute token accuracies
         """
         mode = "train" if self.model.training else "eval"
-        (loss, outputs) = super().compute_loss(
-            model, inputs, return_outputs=True, num_items_in_batch=num_items_in_batch
-        )
+
+        if self.model_accepts_loss_kwargs:
+            loss_kwargs = {}
+            if num_items_in_batch is not None:
+                loss_kwargs["num_items_in_batch"] = num_items_in_batch
+            inputs = {**inputs, **loss_kwargs}
+
+        outputs = model(**inputs, output_hidden_states=True)
+        loss = outputs["loss"]
+        hidden_states = outputs["hidden_states"] if output_hidden_states else None
+        outputs["hidden_states"] = None
+        # (loss, outputs) = super().compute_loss(
+        #     model, inputs, return_outputs=True, num_items_in_batch=num_items_in_batch
+        # )
         if mode == "train":
             # When using padding-free, the attention_mask is not present in the inputs, instead we have cu_seq_lens_q,
             # cu_seq_lens_k, and max_length_k, max_length_q and position_ids.
@@ -869,7 +880,14 @@ class SFTTrainer(Trainer):
             accuracy = (correct_tokens.sum() / total_sum).item() if total_sum > 0 else 0.0
             self._metrics[mode]["mean_token_accuracy"].append(accuracy)
 
-        return (loss, outputs) if return_outputs else loss
+        return_items = (loss, outputs) if return_outputs else loss
+        if output_hidden_states: 
+            if isinstance(return_items, tuple):
+                return_items += (hidden_states,)
+            else: 
+                return_items = [return_items, hidden_states]
+
+        return return_items
 
     # Override training step to add activation offloading context.
     def training_step(self, *args, **kwargs):
@@ -1059,6 +1077,11 @@ STRIPED_MAPPING = {
     8 : (0, 1)
 }
 
+# teacher num_layers: teacher_layer_idx to match to.
+LAYER_SELECTION = {
+    28: [3, 7, 11, 15, 19, 23, 27], 
+    40: [3, 7, 11, 15, 19, 23, 27, 31, 35, 39]
+}
 
 class DistillTrainer(SFTTrainer): 
     def __init__(self, 
@@ -1088,11 +1111,15 @@ class DistillTrainer(SFTTrainer):
         self.hidden_alpha = hidden_alpha
         self.matching_location = matching_location
 
-        self.adapters = nn.ModuleList([nn.Linear(self.model.config.hidden_size, self.teacher.config.hidden_size) for _ in range(4)]).to(self.model.device)
+        if self.model.config.hidden_size != self.teacher.config.hidden_size:
+            self.adapters = nn.ModuleList([nn.Linear(self.model.config.hidden_size, self.teacher.config.hidden_size) for _ in range(self.model.config.num_hidden_layers)]).to(self.model.device)
+        else:
+            self.adapters = None
 
     def create_optimizer(self): 
         super().create_optimizer() 
-        self.optimizer.add_param_group({"params": self.adapters.parameters(), "lr": 2e-5})
+        if self.adapters is not None:
+            self.optimizer.add_param_group({"params": self.adapters.parameters(), "lr": 2e-5})
 
 
 
@@ -1101,8 +1128,8 @@ class DistillTrainer(SFTTrainer):
         Compute training loss and additionally compute token accuracies
         """
         mode = "train" if self.model.training else "eval"
-        (loss, outputs) = super().compute_loss(
-            model, inputs, return_outputs=True, num_items_in_batch=num_items_in_batch
+        (loss, outputs, hidden_states) = super().compute_loss(
+            model, inputs, return_outputs=True, num_items_in_batch=num_items_in_batch, output_hidden_states=True
         )
         teacher_inputs = {k: v.to(self.teacher.device) for k, v in inputs.items()}
         with torch.no_grad():
@@ -1112,31 +1139,38 @@ class DistillTrainer(SFTTrainer):
         student_logits = outputs["logits"]
 
         teacher_hidden = teacher_outputs["hidden_states"]
-        student_hidden = self.model(**inputs, output_hidden_states=True).hidden_states
+        student_hidden = hidden_states
 
-        if self.kl_alpha > 0: 
-            pass 
-            # TODO
-            kl_loss = self.kl_loss(teacher_logits, student_logits, inputs["attention_mask"])
-        
-        if self.hidden_alpha > 0: 
-            if self.matching_location == "last": 
+        if mode == "train": 
+            if self.kl_alpha > 0: 
                 pass 
                 # TODO
-            elif self.matching_location == "striped": 
+                kl_loss = self.kl_loss(teacher_logits, student_logits, inputs["attention_mask"])
+            
+            if self.hidden_alpha > 0: 
+                if self.matching_location == "last": 
+                    pass 
+                    # TODO
+                elif self.matching_location == "striped": 
+                    pass
+                    # TODO
+                    assert isinstance(self.model, ParallelModel) and self.model.parallel, f"striped matching is only valid for parallel models"
+                    teacher_hidden, student_hidden = self.select_striped_hidden(teacher_hidden, student_hidden)
+                elif self.matching_location == "forward": 
+                    teacher_hidden, student_hidden = self.select_forward_matching(teacher_hidden, student_hidden)
+                else: 
+                    raise NotImplementedError(f"Hidden state matching has not been implemented for matching location {self.matching_location}")
                 pass
-                # TODO
-                teacher_hidden, student_hidden = self.select_striped_hidden(teacher_hidden, student_hidden)
-                student_hidden = [l(s.to(self.model.device)) for l, s in zip(self.adapters, student_hidden)]
+                
+                student_hidden = [l(s.to(self.model.device)) for l, s in zip(self.adapters, student_hidden)] if self.adapters is not None else student_hidden
                 hidden_loss = self.hidden_loss(teacher_hidden, student_hidden, inputs["attention_mask"])
-            else: 
-                raise NotImplementedError(f"Hidden state matching has not been implemented for matching location {self.matching_location}")
-            pass
-        
+            
 
-        final_loss = self.ce_alpha * loss.to(self.model.device) \
-            + self.kl_alpha * kl_loss \
-            + self.hidden_alpha * hidden_loss 
+            final_loss = self.ce_alpha * loss.to(self.model.device) \
+                + self.kl_alpha * kl_loss \
+                + self.hidden_alpha * hidden_loss 
+        else: 
+            final_loss = loss.to(self.model.device)
         
         final_loss = final_loss.to(self.model.device)
 
@@ -1178,3 +1212,11 @@ class DistillTrainer(SFTTrainer):
             teacher_hidden_states.append(t[k+1]) 
             student_hidden_states.append(s[module][layer])
         return teacher_hidden_states, student_hidden_states
+
+    def select_forward_matching(self, t, s): 
+        num_teacher_layers = self.teacher.config.num_hidden_layers 
+        teacher_layer_ids = LAYER_SELECTION[num_teacher_layers]
+        t = [t[i+1] for i in teacher_layer_ids]
+        s = s[1:] 
+        assert len(t) == len(s), f"Number of teacher layers should match number of student layers, but got len(t) = {len(t)} and len(s) = {len(s)}"
+        return t, s
