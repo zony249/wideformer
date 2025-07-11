@@ -19,6 +19,8 @@ from models import (
     Qwen3ForCausalLM
 )
 
+from accelerate import Accelerator
+
 from model_utils import load_model, create_student_from_teacher
 
 
@@ -63,7 +65,9 @@ if __name__ == "__main__":
     else: 
         model, tok = load_model(args.base_model, torch_dtype=torch.bfloat16)
 
-    teacher_model, teacher_tok = load_model(args.teacher_model, parallel=False, torch_dtype=torch.bfloat16)
+    teacher_model, teacher_tok = load_model(args.teacher_model, parallel=False, torch_dtype=torch.bfloat16, device_map="auto")
+
+
 
     # Parallelize model if needed
     if args.parallel_lanes is not None: 
