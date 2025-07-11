@@ -28,11 +28,13 @@ if __name__ == "__main__":
     parser = ArgumentParser("finetune.py")
     parser.add_argument("--output_dir", type=str, default="runs")
     parser.add_argument("--base_model", type=str, required=True)
-    parser.add_argument("--task", type=str, required=True, choices=["hellaswag"])
+    parser.add_argument("--task", type=str, required=True, choices=["hellaswag", "wikitext"])
     parser.add_argument("--lora_adapter", type=str, default=None, help="\"random_init\", name of adapter, or None")
     parser.add_argument("--eval_every_steps", type=int, default=25)
     parser.add_argument("--epochs", type=int, default=1)
     parser.add_argument("--batch_size", type=int, default=8)
+    parser.add_argument("--lr", type=float, default=2e-5)
+    parser.add_argument("--gradient_accumulation_steps", type=int, default=1)
     parser.add_argument("--force_load_local_dataset", action="store_true")
     parser.add_argument("--local_dataset_dir", type=str, default=None)
     parser.add_argument("--parallel_lanes", type=int, default=None)
@@ -77,9 +79,12 @@ if __name__ == "__main__":
         output_dir=args.output_dir, 
         num_train_epochs=args.epochs, 
         per_device_train_batch_size=args.batch_size,
+        per_device_eval_batch_size=args.batch_size, 
+        learning_rate=args.lr, 
         eval_strategy="steps", 
         eval_steps=args.eval_every_steps, 
         save_steps=args.eval_every_steps, 
+        gradient_accumulation_steps=args.gradient_accumulation_steps, 
         save_strategy="best", 
         metric_for_best_model="eval_loss")
 
