@@ -1080,6 +1080,7 @@ STRIPED_MAPPING = {
 # teacher num_layers: teacher_layer_idx to match to.
 LAYER_SELECTION = {
     28: [3, 7, 11, 15, 19, 23, 27], 
+    36: [3, 7, 11, 15, 19, 23, 27, 31, 35], 
     40: [3, 7, 11, 15, 19, 23, 27, 31, 35, 39]
 }
 
