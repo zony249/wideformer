@@ -28,7 +28,7 @@ if __name__ == "__main__":
     parser = ArgumentParser("finetune.py")
     parser.add_argument("--output_dir", type=str, default="runs")
     parser.add_argument("--base_model", type=str, required=True)
-    parser.add_argument("--task", type=str, required=True, choices=["hellaswag", "wikitext"])
+    parser.add_argument("--task", type=str, required=True, choices=["hellaswag", "wikitext", "coqa"])
     parser.add_argument("--lora_adapter", type=str, default=None, help="\"random_init\", name of adapter, or None")
     parser.add_argument("--eval_every_steps", type=int, default=25)
     parser.add_argument("--epochs", type=int, default=1)
@@ -42,7 +42,10 @@ if __name__ == "__main__":
 
     # os.makedirs(args.output_dir)
 
+    model, tok = load_model(args.base_model, torch_dtype=torch.bfloat16)
+
     datasets, formatting_func = get_dataset_and_task_processor(args.task, 
+                                                               tok=tok, 
                                                                val_test_only=False, 
                                                                load_from_disk=args.force_load_local_dataset, 
                                                                local_dataset_dir=args.local_dataset_dir)
@@ -50,7 +53,6 @@ if __name__ == "__main__":
     trainset = datasets["train"]
     eval_set = datasets["validation"]
 
-    model, tok = load_model(args.base_model, torch_dtype=torch.bfloat16)
 
     # Parallelize model if needed
     if args.parallel_lanes is not None: 

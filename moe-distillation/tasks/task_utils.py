@@ -13,7 +13,7 @@ class AbstractTask:
     def __init__(self, **dataset_kwargs): 
         self.datasets = self.get_datasets(**dataset_kwargs) # {"split": dataset}
     @abstractmethod
-    def get_dataset(self, **dataset_kwargs): 
+    def get_datasets(self, **dataset_kwargs): 
         raise NotImplementedError 
     @abstractmethod
     def pre_process_fn(self, example: Dict) -> Any:

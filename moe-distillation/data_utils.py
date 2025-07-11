@@ -8,15 +8,18 @@ from torch.utils.data import Dataset
 from datasets import load_dataset 
 from tasks import (
     Hellaswag, 
-    WikiText
+    WikiText, 
+    CoQA
 )
 
 TASK_MAP = { 
     "hellaswag": Hellaswag, 
-    "wikitext" : WikiText
+    "wikitext" : WikiText,
+    "coqa": CoQA
 }
 
 def get_dataset_and_task_processor(task_name: str, 
+                                   tok=None, 
                                    val_test_only=False, 
                                    load_from_disk=False,
                                    local_dataset_dir=None) -> Tuple[Dataset, callable]: 
@@ -33,6 +36,13 @@ def get_dataset_and_task_processor(task_name: str,
         split = ["validation", "test"] 
         split = split + ["train"] if not val_test_only else split
         task = TASK_MAP[task_name](splits=split, 
+                                   load_local=load_from_disk, 
+                                   local_dir=local_dataset_dir)
+    elif task_name == "coqa": 
+        split = ["validation"] 
+        split = split + ["train"] if not val_test_only else split
+        task = TASK_MAP[task_name](splits=split,
+                                   tok=tok, 
                                    load_local=load_from_disk, 
                                    local_dir=local_dataset_dir)
     else: 

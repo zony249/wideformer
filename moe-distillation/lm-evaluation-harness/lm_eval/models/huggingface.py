@@ -40,7 +40,7 @@ from lm_eval.models.utils import (
 import sys 
 from accelerate import dispatch_model
 
-from models.parallel_models.modeling_qwen3 import Qwen3ForCausalLMParallel
+# from ..models.parallel_models.modeling_qwen3 import Qwen3ForCausalLMParallel
 from transformers.modeling_utils import load_sharded_checkpoint
 
 if TYPE_CHECKING:
@@ -615,7 +615,7 @@ class HFLM(TemplateLM):
             config = AutoConfig.from_pretrained(pretrained, 
                                                 torch_dtype=get_dtype(dtype), 
                                                 **model_kwargs)
-            if config.model_type == "qwen3": 
+            if config.model_type == "": 
                 self._model = Qwen3ForCausalLMParallel(config)
                 if parallel_lanes is not None:
                     self._model.parallelize(parallel_lanes)
@@ -623,8 +623,8 @@ class HFLM(TemplateLM):
                 self._model.load_from_disk(pretrained)
                 self._model = dispatch_model(self._model, device_map=accelerate_args["device_map"])
             else: 
-                # self._model = self.AUTO_MODEL_CLASS.from_pretrained(
-                self._model = Qwen3ForCausalLMParallel.from_pretrained(
+                self._model = self.AUTO_MODEL_CLASS.from_pretrained(
+                # self._model = Qwen3ForCausalLMParallel.from_pretrained(
                     pretrained,
                     revision=revision,
                     torch_dtype=get_dtype(dtype),

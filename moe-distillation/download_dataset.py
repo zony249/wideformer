@@ -5,7 +5,7 @@ import datasets
 from datasets import load_dataset 
 
 parser = ArgumentParser("Download dataset")
-parser.add_argument("name", choices=["wikitext", "c4", "pileval", "hellaswag"])
+parser.add_argument("name", choices=["wikitext", "c4", "pileval", "hellaswag", "coqa"])
 
 args = parser.parse_args()
 
@@ -39,5 +39,12 @@ elif args.name == "hellaswag":
     valset.save_to_disk("hellaswag_local/validation")
     testset.save_to_disk("hellaswag_local/test")
     trainset.save_to_disk("hellaswag_local/train")
+elif args.name == "coqa": 
+    trainset = load_dataset("EleutherAI/coqa", "default", split="train")
+    valset = load_dataset("EleutherAI/coqa", "default", split="validation")
+
+    valset.save_to_disk("coqa_local/validation")
+    trainset.save_to_disk("coqa_local/train")
+
 else: 
     raise NotImplementedError()

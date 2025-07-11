@@ -52,21 +52,22 @@ if __name__ == "__main__":
 
     # os.makedirs(args.output_dir)
 
+    # load student and teacher models 
+    if args.base_model == "weight_copy" or args.base_model == "random_init": 
+        model, tok = create_student_from_teacher(args.teacher_model, mode=args.base_model)
+    else: 
+        model, tok = load_model(args.base_model, torch_dtype=torch.bfloat16)
+    teacher_model, teacher_tok = load_model(args.teacher_model, parallel=False, torch_dtype=torch.bfloat16, device_map="auto")
+
+
     datasets, formatting_func = get_dataset_and_task_processor(args.task, 
+                                                               tok=tok, 
                                                                val_test_only=False, 
                                                                load_from_disk=args.force_load_local_dataset, 
                                                                local_dataset_dir=args.local_dataset_dir)
 
     trainset = datasets["train"]
     eval_set = datasets["validation"]
-
-    if args.base_model == "weight_copy" or args.base_model == "random_init": 
-        model, tok = create_student_from_teacher(args.teacher_model, mode=args.base_model)
-    else: 
-        model, tok = load_model(args.base_model, torch_dtype=torch.bfloat16)
-
-    teacher_model, teacher_tok = load_model(args.teacher_model, parallel=False, torch_dtype=torch.bfloat16, device_map="auto")
-
 
 
     # Parallelize model if needed
