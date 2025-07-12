@@ -949,12 +949,26 @@ class SFTTrainer(Trainer):
             self.log(logs, start_time)
 
         metrics = None
+        last_path = os.path.join(self.args.output_dir, "last_tfmr")
+
         if self.control.should_evaluate:
             metrics = self._evaluate(trial, ignore_keys_for_eval)
             is_new_best_metric = self._determine_best_metric(metrics=metrics, trial=trial)
 
             if self.args.save_strategy == SaveStrategy.BEST:
                 self.control.should_save = is_new_best_metric
+            self.log_metric(best_mets, metrics)
+
+            #save after every evaluation
+            if self.is_fsdp_enabled: 
+                self.model.save_pretrained(last_path, 
+                                        is_main_process=self.accelerator.is_main_process,
+                                        save_function=self.accelerator.save,
+                                        state_dict=self.accelerator.get_state_dict(self.model),)
+            else: 
+                unwrapped_model = self.accelerator.unwrap_model(self.model)
+                unwrapped_model.save_pretrained(last_path) 
+                self.processing_class.save_pretrained(last_path)
 
         best_path = os.path.join(self.args.output_dir, "best_tfmr")
         all_mets = os.path.join(self.args.output_dir, "all_metrics.log")
@@ -976,6 +990,7 @@ class SFTTrainer(Trainer):
             else: 
                 unwrapped_model = self.accelerator.unwrap_model(self.model)
                 unwrapped_model.save_pretrained(best_path)
+                self.processing_class.save_pretrained(best_path)
                 # raise NotImplementedError("Please implement saving without fsdp")
 
     def log_metric(self, path, metrics): 

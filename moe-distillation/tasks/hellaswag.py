@@ -60,13 +60,13 @@ class Hellaswag(AbstractTask):
         if isinstance(examples, list):
             outputs = []
             for example in examples:
-                question = f"{example['activity_label']}: {example['ctx_a']} {example['ctx_b'].capitalize()}" + example["endings"][int(example["label"])]
+                question = f"{example['ctx_a']} {example['ctx_b'].capitalize()}" + example["endings"][int(example["label"])]
                 # options = "\n".join([f"{opt}: " + e for opt, e in zip(["A", "B", "C", "D"], example["endings"])]) + "\n\n"
                 # answer = f'Answer: {["A", "B", "C", "D"][int(example["label"])]}'
                 outputs.append(question)
             return outputs
         else: 
-            question = f"{examples['activity_label']}: {examples['ctx_a']} {examples['ctx_b'].capitalize()}" + examples["endings"][int(examples["label"])]
+            question = f"{examples['ctx_a']} {examples['ctx_b'].capitalize()}" + examples["endings"][int(examples["label"])]
             return question
 
 
