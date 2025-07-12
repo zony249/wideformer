@@ -957,7 +957,6 @@ class SFTTrainer(Trainer):
 
             if self.args.save_strategy == SaveStrategy.BEST:
                 self.control.should_save = is_new_best_metric
-            self.log_metric(best_mets, metrics)
 
             #save after every evaluation
             if self.is_fsdp_enabled: 
