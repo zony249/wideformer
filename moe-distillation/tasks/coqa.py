@@ -59,9 +59,12 @@ class CoQA(AbstractTask):
             texts = doc_to_text({"story": story, "questions": questions, "answers": answers})
             list_texts += texts
         # answers = doc_to_target(example)
-        return {"texts": list_texts}
-        
+        batched = {k: [t[k] for t in list_texts] for k in list_texts[0]}
+        return batched
+
+
     def pre_process_fn(self, example):
+        """deprecated"""
         return example["texts"]
 
 def doc_to_text(doc):
@@ -74,7 +77,7 @@ def doc_to_text(doc):
     ):  # omit target answer ai
         question = f"Q: {q}\n\n"
         answer = f"A: {a}\n\n" if a is not None else "A:"
-        outputs.append(doc_text + question + answer)
+        outputs.append({"prompt":doc_text + question, "completion" :answer})
     return outputs
 
 

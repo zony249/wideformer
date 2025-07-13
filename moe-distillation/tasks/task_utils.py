@@ -17,4 +17,7 @@ class AbstractTask:
         raise NotImplementedError 
     @abstractmethod
     def pre_process_fn(self, example: Dict) -> Any:
+        """
+        DEPRECATED
+        """
         raise NotImplementedError

@@ -53,20 +53,24 @@ class Hellaswag(AbstractTask):
             dataset = load_from_disk(os.path.join(local_dir, split))
         else: 
             dataset = load_dataset(name, split=split)
+        dataset = process_docs(dataset)
         return dataset
 
 
     def pre_process_fn(self, examples: List[Dict]) -> Any:
+        """
+        DEPRECATED
+        """
         if isinstance(examples, list):
             outputs = []
             for example in examples:
-                question = f"{example['ctx_a']} {example['ctx_b'].capitalize()}" + example["endings"][int(example["label"])]
+                question = f"TEST TEXT: {example['ctx_a']} {example['ctx_b'].capitalize()}" + example["endings"][int(example["label"])]
                 # options = "\n".join([f"{opt}: " + e for opt, e in zip(["A", "B", "C", "D"], example["endings"])]) + "\n\n"
                 # answer = f'Answer: {["A", "B", "C", "D"][int(example["label"])]}'
                 outputs.append(question)
             return outputs
         else: 
-            question = f"{examples['ctx_a']} {examples['ctx_b'].capitalize()}" + examples["endings"][int(examples["label"])]
+            question = f"TEST TEXT: {examples['ctx_a']} {examples['ctx_b'].capitalize()}" + examples["endings"][int(examples["label"])]
             return question
 
 
@@ -84,14 +88,31 @@ def preprocess(text):
 def process_docs(dataset: datasets.Dataset) -> datasets.Dataset:
     def _process_doc(doc):
         ctx = doc["ctx_a"] + " " + doc["ctx_b"].capitalize()
+        count=0
+        try: 
+            gold = int(doc["label"]) 
+        except ValueError: 
+            count += 1
+            print(f"count: {count}. Label does not exist... defaulting to 0.")
+            gold = 0
         out_doc = {
             "query": preprocess(doc["activity_label"] + ": " + ctx),
             "choices": [preprocess(ending) for ending in doc["endings"]],
-            "gold": int(doc["label"]),
+            "gold": gold,
         }
         return out_doc
 
-    return dataset.map(_process_doc)
+    dataset = dataset.map(_process_doc) 
+
+    def _convert_to_template(doc): 
+        out_doc = { 
+            "prompt": doc["query"], 
+            "completion": doc["choices"][doc["gold"]]
+        }
+        return out_doc
+    
+    return dataset.map(_convert_to_template)
+    
 
 
 

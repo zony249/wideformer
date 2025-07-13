@@ -95,6 +95,6 @@ if __name__ == "__main__":
                          processing_class=tok,
                          args=trainer_cfg, 
                          train_dataset=trainset,
-                         eval_dataset=eval_set,  
-                         formatting_func=formatting_func)
+                         eval_dataset=eval_set,  )
+                        #  formatting_func=formatting_func)
     trainer.train()

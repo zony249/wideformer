@@ -8,7 +8,7 @@ base_model = Qwen3ForCausalLMParallel.from_pretrained("Qwen/Qwen3-8B", torch_dty
 # base_model.parallelize(4)
 tokenizer = AutoTokenizer.from_pretrained("Qwen/Qwen3-8B")
 
-peft_model = PeftModelForCausalLM.from_pretrained(base_model, "runs/Qwen3-8B-finetune-hellaswag/adapters")
+peft_model = PeftModelForCausalLM.from_pretrained(base_model, "runs/q3-8b-hellaswag--2025-07-12--03:48:25/last_tfmr")
 merged_model = peft_model.merge_and_unload()
-merged_model.save_pretrained("runs/Qwen3-8B-finetune-hellaswag")
-tokenizer.save_pretrained("runs/Qwen3-8B-finetune-hellaswag")
+merged_model.save_pretrained("runs/q3-8b-hellaswag--2025-07-12--03:48:25")
+tokenizer.save_pretrained("runs/q3-8b-hellaswag--2025-07-12--03:48:25")
