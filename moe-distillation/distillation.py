@@ -19,7 +19,7 @@ from models import (
     Qwen3ForCausalLM
 )
 
-from accelerate import Accelerator
+from accelerate import Accelerator, load_checkpoint_and_dispatch, init_empty_weights
 
 from model_utils import load_model, create_student_from_teacher
 
@@ -30,7 +30,7 @@ if __name__ == "__main__":
     parser = ArgumentParser("finetune.py")
     parser.add_argument("--output_dir", type=str, default="runs")
     parser.add_argument("--base_model", type=str, required=True)
-    parser.add_argument("--task", type=str, required=True, choices=["hellaswag", "wikitext"])
+    parser.add_argument("--task", type=str, required=True, choices=["hellaswag", "wikitext", "coqa"])
     parser.add_argument("--lora_adapter", type=str, default=None, help="\"random_init\", name of adapter, or None")
     parser.add_argument("--eval_every_steps", type=int, default=25)
     parser.add_argument("--epochs", type=int, default=1)
@@ -57,7 +57,13 @@ if __name__ == "__main__":
         model, tok = create_student_from_teacher(args.teacher_model, mode=args.base_model)
     else: 
         model, tok = load_model(args.base_model, torch_dtype=torch.bfloat16)
-    teacher_model, teacher_tok = load_model(args.teacher_model, parallel=False, torch_dtype=torch.bfloat16, device_map="auto")
+
+    # with init_empty_weights():
+    teacher_model, teacher_tok = load_model(args.teacher_model, torch_dtype=torch.bfloat16, device_map="auto")
+
+    # teacher_model = load_checkpoint_and_dispatch(
+    #     teacher_model, checkpoint=args.teacher_model, device_map="auto", no_split_module_classes=['Qwen3DecoderLayer']
+    # )
 
 
     datasets, formatting_func = get_dataset_and_task_processor(args.task, 
@@ -113,7 +119,6 @@ if __name__ == "__main__":
                          args=trainer_cfg, 
                          train_dataset=trainset,
                          eval_dataset=eval_set,  
-                         formatting_func=formatting_func, 
                          ce_alpha=args.ce_alpha, 
                          kl_alpha=args.kl_alpha, 
                          hidden_alpha=args.hidden_alpha, 

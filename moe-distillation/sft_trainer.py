@@ -1118,8 +1118,9 @@ class DistillTrainer(SFTTrainer):
         else: 
             no_split = NO_SPLIT_MODULE_CLASSES[self.teacher.config.model_type]
 
-        device_map = infer_auto_device_map(self.teacher, no_split_module_classes=no_split)
-        self.teacher = dispatch_model(self.teacher, device_map)
+
+        # device_map = infer_auto_device_map(self.teacher, no_split_module_classes=no_split)
+        # self.teacher = dispatch_model(self.teacher, device_map)
 
         self.ce_alpha = ce_alpha
         self.kl_alpha = kl_alpha 
@@ -1146,17 +1147,19 @@ class DistillTrainer(SFTTrainer):
         (loss, outputs, hidden_states) = super().compute_loss(
             model, inputs, return_outputs=True, num_items_in_batch=num_items_in_batch, output_hidden_states=True
         )
-        teacher_inputs = {k: v.to(self.teacher.device) for k, v in inputs.items()}
-        with torch.no_grad():
-            teacher_outputs = self.teacher(**teacher_inputs, output_hidden_states=True)
 
-        teacher_logits = teacher_outputs["logits"]
-        student_logits = outputs["logits"]
+        if mode == "train":
+            teacher_inputs = {k: v.to(self.teacher.device) for k, v in inputs.items() if k != "labels"}
 
-        teacher_hidden = teacher_outputs["hidden_states"]
-        student_hidden = hidden_states
+            with torch.no_grad():
+                teacher_outputs = self.teacher(**teacher_inputs, output_hidden_states=True)
 
-        if mode == "train": 
+            teacher_logits = teacher_outputs["logits"]
+            student_logits = outputs["logits"]
+
+            teacher_hidden = teacher_outputs["hidden_states"]
+            student_hidden = hidden_states
+
             if self.kl_alpha > 0: 
                 pass 
                 # TODO
@@ -1179,7 +1182,11 @@ class DistillTrainer(SFTTrainer):
                 
                 student_hidden = [l(s.to(self.model.device)) for l, s in zip(self.adapters, student_hidden)] if self.adapters is not None else student_hidden
                 hidden_loss = self.hidden_loss(teacher_hidden, student_hidden, inputs["attention_mask"])
-            
+
+            del teacher_hidden
+            del student_hidden
+            del teacher_logits
+            del student_logits 
 
             final_loss = self.ce_alpha * loss.to(self.model.device) \
                 + self.kl_alpha * kl_loss \
