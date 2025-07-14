@@ -46,6 +46,8 @@ class CoQA(AbstractTask):
             assert local_dir is not None, f"load_local is True, but local_dir is not specified"
             dataset = load_from_disk(os.path.join(local_dir, split))
         else: 
+            if split == "validation": 
+                split = "validation[:10%]"
             dataset = load_dataset(name, split=split)
         pass
 

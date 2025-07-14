@@ -41,7 +41,7 @@ elif args.name == "hellaswag":
     trainset.save_to_disk("hellaswag_local/train")
 elif args.name == "coqa": 
     trainset = load_dataset("EleutherAI/coqa", "default", split="train")
-    valset = load_dataset("EleutherAI/coqa", "default", split="validation")
+    valset = load_dataset("EleutherAI/coqa", "default", split="validation[:10%]")
 
     valset.save_to_disk("coqa_local/validation")
     trainset.save_to_disk("coqa_local/train")
