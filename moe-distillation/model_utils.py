@@ -39,15 +39,29 @@ def create_student_from_teacher(hf_name_or_path: str, mode="weight_copy"):
     config = AutoConfig.from_pretrained(hf_name_or_path)
     config.torch_dtype = torch.bfloat16
     tok = AutoTokenizer.from_pretrained(hf_name_or_path)
+
     if config.model_type == "qwen3": 
         template_model = AutoModelForCausalLM.from_pretrained(hf_name_or_path, torch_dtype=torch.bfloat16) 
         config.num_hidden_layers = len(LAYER_COPY_MAP[template_model.config.num_hidden_layers])
         if mode == "weight_copy":
+            
             layers = nn.ModuleList([deepcopy(template_model.model.layers[i]) for i in LAYER_COPY_MAP[template_model.config.num_hidden_layers]])
-            template_model.model.layers = layers 
-            template_model.config = config
+            embeddings = deepcopy(template_model.model.embed_tokens)
+            norm = deepcopy(template_model.model.norm)
+            rotary_emb = deepcopy(template_model.model.rotary_emb)
+            lm_head = deepcopy(template_model.lm_head)
+
+            empty_model = Qwen3ForCausalLM(config)
+            empty_model.model.embed_tokens = embeddings 
+            empty_model.model.layers = layers 
+            empty_model.model.rotary_emb = rotary_emb 
+            empty_model.model.norm = norm 
+            empty_model.lm_head = lm_head 
+
+            return empty_model, tok 
+
         elif mode == "random_init": 
             template_model = Qwen3ForCausalLM(config)
-        return template_model, tok
+            return template_model, tok
     else: 
         raise NotImplementedError("layer selection is not implemented for the current model")

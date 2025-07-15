@@ -3,12 +3,18 @@ import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer 
 from peft import PeftModelForCausalLM
 from models.parallel_models.modeling_qwen3 import Qwen3ForCausalLMParallel
+from model_utils import create_student_from_teacher
 
-base_model = Qwen3ForCausalLMParallel.from_pretrained("Qwen/Qwen3-0.6B", torch_dtype=torch.bfloat16)
+base = "Qwen/Qwen3-0.6B"
+adapter = "runs/q3-0.6b-coqa--forward/best_tfmr"
+save_as = "runs/q3-0.6b-coqa--forward"
+
+# base_model = AutoModelForCausalLM.from_pretrained(base, torch_dtype=torch.bfloat16)
+base_model, tok = create_student_from_teacher(base, "weight_copy")
 # base_model.parallelize(4)
-tokenizer = AutoTokenizer.from_pretrained("Qwen/Qwen3-0.6B")
+tokenizer = AutoTokenizer.from_pretrained(base)
 
-peft_model = PeftModelForCausalLM.from_pretrained(base_model, "runs/Qwen3-0.6b-hellaswag/best_tfmr")
+peft_model = PeftModelForCausalLM.from_pretrained(base_model, adapter)
 merged_model = peft_model.merge_and_unload()
-merged_model.save_pretrained("runs/Qwen3-0.6b-hellaswag/")
-tokenizer.save_pretrained("runs/Qwen3-0.6b-hellaswag/")
+merged_model.save_pretrained(save_as)
+tokenizer.save_pretrained(save_as)
