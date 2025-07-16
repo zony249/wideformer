@@ -3,13 +3,13 @@ from transformers import AutoTokenizer, AutoConfig
 from models import Qwen3ForCausalLM, Qwen3ModelParallel, Qwen3ForCausalLMParallel
 import torch
 
-os.environ["CUDA_VISIBLE_DEVICES"] = "4,5,6,7"
+os.environ["CUDA_VISIBLE_DEVICES"] = "0,6"
 
-config = AutoConfig.from_pretrained("runs/Qwen3-0.6b-hellaswag")
-model = Qwen3ForCausalLM.from_pretrained("runs/Qwen3-0.6b-hellaswag", device_map="auto")
+config = AutoConfig.from_pretrained("runs/Qwen3-8B-finetuned-coqa")
+model = Qwen3ForCausalLM.from_pretrained("runs/Qwen3-8B-finetuned-hellaswag", device_map="auto")
 
 # model.parallelize(4)
-tok = AutoTokenizer.from_pretrained("runs/Qwen3-0.6b-hellaswag") 
+tok = AutoTokenizer.from_pretrained("runs/Qwen3-8B-finetuned-coqa") 
 
 
 
