@@ -1127,6 +1127,9 @@ class DistillTrainer(SFTTrainer):
         self.hidden_alpha = hidden_alpha
         self.matching_location = matching_location
 
+        self.permute_layers = torch.randperm(len(LAYER_SELECTION[self.teacher.config.num_hidden_layers]))
+
+
         if self.model.config.hidden_size != self.teacher.config.hidden_size:
             self.adapters = nn.ModuleList([nn.Linear(self.model.config.hidden_size, self.teacher.config.hidden_size) for _ in range(self.model.config.num_hidden_layers)]).to(self.model.device)
         else:
@@ -1176,6 +1179,12 @@ class DistillTrainer(SFTTrainer):
                     teacher_hidden, student_hidden = self.select_striped_hidden(teacher_hidden, student_hidden)
                 elif self.matching_location == "forward": 
                     teacher_hidden, student_hidden = self.select_forward_matching(teacher_hidden, student_hidden)
+                elif self.matching_location == "reverse": 
+                    teacher_hidden, student_hidden = self.select_reverse_matching(teacher_hidden, student_hidden)
+                elif self.matching_location == "all_one": 
+                    teacher_hidden, student_hidden = self.select_all_one_matching(teacher_hidden, student_hidden)
+                elif self.matching_location == "shuffle": 
+                    teacher_hidden, student_hidden = self.select_shuffle_matching(teacher_hidden, student_hidden)
                 else: 
                     raise NotImplementedError(f"Hidden state matching has not been implemented for matching location {self.matching_location}")
                 pass
@@ -1239,6 +1248,30 @@ class DistillTrainer(SFTTrainer):
         num_teacher_layers = self.teacher.config.num_hidden_layers 
         teacher_layer_ids = LAYER_SELECTION[num_teacher_layers]
         t = [t[i+1] for i in teacher_layer_ids]
+        s = s[1:] 
+        assert len(t) == len(s), f"Number of teacher layers should match number of student layers, but got len(t) = {len(t)} and len(s) = {len(s)}"
+        return t, s
+
+    def select_reverse_matching(self, t, s): 
+        num_teacher_layers = self.teacher.config.num_hidden_layers 
+        teacher_layer_ids = LAYER_SELECTION[num_teacher_layers][::-1]
+        t = [t[i+1] for i in teacher_layer_ids]
+        s = s[1:] 
+        assert len(t) == len(s), f"Number of teacher layers should match number of student layers, but got len(t) = {len(t)} and len(s) = {len(s)}"
+        return t, s
+        
+    def select_shuffle_matching(self, t, s): 
+        num_teacher_layers = self.teacher.config.num_hidden_layers 
+        teacher_layer_ids = [LAYER_SELECTION[num_teacher_layers][i] for i in self.permute_layers]
+        t = [t[i+1] for i in teacher_layer_ids]
+        s = s[1:] 
+        assert len(t) == len(s), f"Number of teacher layers should match number of student layers, but got len(t) = {len(t)} and len(s) = {len(s)}"
+        return t, s
+    
+    def select_all_one_matching(self, t, s): 
+        num_teacher_layers = self.teacher.config.num_hidden_layers 
+        teacher_layer_ids = [num_teacher_layers // 2 for i in range(len(LAYER_SELECTION[num_teacher_layers]))]
+        t = [t[i] for i in teacher_layer_ids]
         s = s[1:] 
         assert len(t) == len(s), f"Number of teacher layers should match number of student layers, but got len(t) = {len(t)} and len(s) = {len(s)}"
         return t, s
