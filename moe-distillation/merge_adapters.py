@@ -6,8 +6,8 @@ from models.parallel_models.modeling_qwen3 import Qwen3ForCausalLMParallel
 from model_utils import create_student_from_teacher
 
 base = "Qwen/Qwen3-8B"
-adapter = "runs/Qwen3-8B-finetuned-coqa/best_tfmr"
-save_as = "runs/Qwen3-8B-finetuned-coqa"
+adapter = "runs/Qwen3-8B-finetuned-hellaswag-2/last_tfmr"
+save_as = "runs/Qwen3-8B-finetuned-hellaswag-2"
 
 base_model = AutoModelForCausalLM.from_pretrained(base, torch_dtype=torch.bfloat16)
 # base_model, tok = create_student_from_teacher(base, "weight_copy")

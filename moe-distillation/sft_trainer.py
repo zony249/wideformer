@@ -1191,6 +1191,8 @@ class DistillTrainer(SFTTrainer):
                 
                 student_hidden = [l(s.to(self.model.device)) for l, s in zip(self.adapters, student_hidden)] if self.adapters is not None else student_hidden
                 hidden_loss = self.hidden_loss(teacher_hidden, student_hidden, inputs["attention_mask"])
+            else: 
+                hidden_loss = 0
 
             del teacher_hidden
             del student_hidden
