@@ -57,10 +57,10 @@ if __name__ == "__main__":
     if args.base_model == "weight_copy" or args.base_model == "random_init": 
         model, tok = create_student_from_teacher(args.teacher_model, mode=args.base_model)
     else: 
-        model, tok = load_model(args.base_model, torch_dtype=torch.bfloat16)
+        model, tok = load_model(args.base_model, torch_dtype=torch.bfloat16,)
 
     # with init_empty_weights():
-    teacher_model, teacher_tok = load_model(args.teacher_model, torch_dtype=torch.bfloat16, device_map="auto")
+    teacher_model, teacher_tok = load_model(args.teacher_model, torch_dtype=torch.bfloat16)
 
     # teacher_model = load_checkpoint_and_dispatch(
     #     teacher_model, checkpoint=args.teacher_model, device_map="auto", no_split_module_classes=['Qwen3DecoderLayer']
@@ -99,6 +99,10 @@ if __name__ == "__main__":
     elif args.lora_adapter is not None: 
         raise NotImplementedError("TODO: Implement loading trained adapters")
 
+
+
+    accelerator = Accelerator() 
+    teacher_model = accelerator.prepare_model(teacher_model, device_placement=True, evaluation_mode=True)
 
     trainer_cfg = SFTConfig(
         output_dir=args.output_dir, 

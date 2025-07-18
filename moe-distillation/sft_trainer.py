@@ -63,6 +63,7 @@ from trl.trainer.utils import (
 )
 from transformers.utils import is_torch_xla_available
 from transformers.modeling_utils import unwrap_model
+import torch.distributed as dist
 
 
 if is_peft_available():
@@ -1153,14 +1154,13 @@ class DistillTrainer(SFTTrainer):
 
         if mode == "train":
             teacher_inputs = {k: v.to(self.teacher.device) for k, v in inputs.items() if k != "labels"}
-
+            
             with torch.no_grad():
                 teacher_outputs = self.teacher(**teacher_inputs, output_hidden_states=True)
+                teacher_logits = teacher_outputs["logits"]
+                teacher_hidden = teacher_outputs["hidden_states"]
 
-            teacher_logits = teacher_outputs["logits"]
             student_logits = outputs["logits"]
-
-            teacher_hidden = teacher_outputs["hidden_states"]
             student_hidden = hidden_states
 
             if self.kl_alpha > 0: 
@@ -1191,38 +1191,41 @@ class DistillTrainer(SFTTrainer):
                 
                 student_hidden = [l(s.to(self.model.device)) for l, s in zip(self.adapters, student_hidden)] if self.adapters is not None else student_hidden
                 hidden_loss = self.hidden_loss(teacher_hidden, student_hidden, inputs["attention_mask"])
+            else: 
+                hidden_loss = 0
 
             del teacher_hidden
             del student_hidden
             del teacher_logits
             del student_logits 
 
-            final_loss = self.ce_alpha * loss.to(self.model.device) \
+            final_loss = self.ce_alpha * loss \
                 + self.kl_alpha * kl_loss \
                 + self.hidden_alpha * hidden_loss 
         else: 
-            final_loss = loss.to(self.model.device)
+            final_loss = loss
         
-        final_loss = final_loss.to(self.model.device)
+        final_loss = final_loss
 
         return (final_loss, outputs) if return_outputs else final_loss
 
     def kl_loss(self, t, s, attention_mask): 
 
-        t = F.softmax(t, dim=-1).to(self.model.device)
-        s = F.log_softmax(s, dim=-1).to(self.model.device)
+        t = F.softmax(t, dim=-1).to(s.device)
+        s = F.log_softmax(s, dim=-1)#.to("cuda:0")
         loss = F.kl_div(s, t, reduction="none")
-        valid = attention_mask.sum().to(self.model.device)
+        valid = attention_mask.sum().to(s.device)
         total = attention_mask.numel()
         return loss.sum(dim=(-1)).mean() * valid / total
 
     def hidden_loss(self, t, s, attention_mask, normalize_hidden=True): 
 
-        valids = attention_mask.sum().to(self.model.device)
+        valids = attention_mask.sum().to(s[0].device)
         totals = attention_mask.numel()
+        t = [ts.to(s[0].device) for ts in t]
 
-        t = torch.stack(t, dim=0).to(self.model.device)
-        s = torch.stack(s, dim=0).to(self.model.device)
+        t = torch.stack(t, dim=0).to(s[0].device)
+        s = torch.stack(s, dim=0)
 
         if normalize_hidden: 
             t = t / t.norm(dim=-1, keepdim=True)
