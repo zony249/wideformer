@@ -47,4 +47,4 @@ def get_dataset_and_task_processor(task_name: str,
                                    local_dir=local_dataset_dir)
     else: 
         raise NotImplementedError
-    return task.datasets, task.pre_process_fn
+    return task.datasets, task.compute_metrics

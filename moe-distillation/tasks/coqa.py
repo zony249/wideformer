@@ -3,6 +3,8 @@ import os
 import transformers.data.metrics.squad_metrics as squad_metrics
 from datasets import load_dataset, load_from_disk
 
+import torch
+import numpy as np
 from .task_utils import AbstractTask 
 
 class CoQA(AbstractTask):
@@ -16,6 +18,7 @@ class CoQA(AbstractTask):
                          local_dir=local_dir)
         self.tok = tok 
         assert tok is not None, f"CoQA requires tokenizer to be defined, however it is not."
+        self.metrics = None
 
     def get_datasets(self, **dataset_kwargs):
 
@@ -65,9 +68,39 @@ class CoQA(AbstractTask):
         return batched
 
 
-    def pre_process_fn(self, example):
-        """deprecated"""
-        return example["texts"]
+    def compute_metrics(self, eval_prediction, compute_result=False):
+        
+        preds = eval_prediction[0] 
+        label_ids = eval_prediction[1]
+
+        if isinstance(preds, np.ndarray) or isinstance(preds, torch.Tensor): 
+            preds = (preds,) 
+        if isinstance(label_ids, np.ndarray) or isinstance(label_ids, torch.Tensor): 
+            label_ids = (label_ids,)
+
+        assert len(preds) == len(label_ids) 
+
+        matches = 0 
+        total = 1
+        for p, l in zip(preds, label_ids): 
+            matches += torch.sum(torch.argmax(p, dim=-1) == l)
+            total += torch.sum(l != -100)
+
+        if self.metrics is None: 
+            self.metrics = {
+                "matches": matches, 
+                "total": total
+            }
+        else: 
+            self.metrics["matches"] += matches 
+            self.metrics["total"] += total 
+
+        if compute_result: 
+            output =  {"mean_token_accuracy": self.metrics["matches"] / self.metrics["total"]}
+            self.metrics = None 
+            return output
+        return {"mean_token_accuracy": matches / total}
+        
 
 def doc_to_text(doc):
     # Given a passage p, the conversation history {q1, a1, . . . qi−1, ai−1}

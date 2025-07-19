@@ -72,6 +72,9 @@ class Hellaswag(AbstractTask):
         else: 
             question = f"TEST TEXT: {examples['ctx_a']} {examples['ctx_b'].capitalize()}" + examples["endings"][int(examples["label"])]
             return question
+        
+    def compute_metrics(self, eval_predictions): 
+        pass
 
 
 # This is from LM_Eval: 

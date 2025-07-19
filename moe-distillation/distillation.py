@@ -67,7 +67,7 @@ if __name__ == "__main__":
     # )
 
 
-    datasets, formatting_func = get_dataset_and_task_processor(args.task, 
+    datasets, compute_metrics = get_dataset_and_task_processor(args.task, 
                                                                tok=tok, 
                                                                val_test_only=False, 
                                                                load_from_disk=args.force_load_local_dataset, 
@@ -116,7 +116,8 @@ if __name__ == "__main__":
         save_steps=args.eval_every_steps, 
         gradient_accumulation_steps=args.gradient_accumulation_steps, 
         save_strategy="best", 
-        metric_for_best_model="eval_loss")
+        metric_for_best_model="mean_token_accuracy", 
+        batch_eval_metrics=True)
 
 
     trainer = DistillTrainer(model=model, 
@@ -128,5 +129,6 @@ if __name__ == "__main__":
                          ce_alpha=args.ce_alpha, 
                          kl_alpha=args.kl_alpha, 
                          hidden_alpha=args.hidden_alpha, 
-                         matching_location=args.matching_location)
+                         matching_location=args.matching_location, 
+                         compute_metrics=compute_metrics)
     trainer.train()

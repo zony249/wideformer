@@ -6,11 +6,11 @@ from models.parallel_models.modeling_qwen3 import Qwen3ForCausalLMParallel
 from model_utils import create_student_from_teacher
 
 base = "Qwen/Qwen3-8B"
-adapter = "runs/Qwen3-8B-finetuned-hellaswag-2/last_tfmr"
-save_as = "runs/Qwen3-8B-finetuned-hellaswag-2"
+adapter = "runs/Qwen3-8B-distill-reverse-coqa-2/best_tfmr"
+save_as = "runs/Qwen3-8B-distill-reverse-coqa-2"
 
-base_model = AutoModelForCausalLM.from_pretrained(base, torch_dtype=torch.bfloat16)
-# base_model, tok = create_student_from_teacher(base, "weight_copy")
+# base_model = AutoModelForCausalLM.from_pretrained(base, torch_dtype=torch.bfloat16)
+base_model, tok = create_student_from_teacher(base, "weight_copy")
 # base_model.parallelize(4)
 tokenizer = AutoTokenizer.from_pretrained(base)
 
