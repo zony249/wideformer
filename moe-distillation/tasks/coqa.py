@@ -73,18 +73,17 @@ class CoQA(AbstractTask):
         preds = eval_prediction[0] 
         label_ids = eval_prediction[1]
 
-        if isinstance(preds, np.ndarray) or isinstance(preds, torch.Tensor): 
-            preds = (preds,) 
-        if isinstance(label_ids, np.ndarray) or isinstance(label_ids, torch.Tensor): 
-            label_ids = (label_ids,)
+        preds = preds[..., :-1, :].contiguous()
+        label_ids = label_ids[..., 1:].contiguous()
+
 
         assert len(preds) == len(label_ids) 
 
         matches = 0 
         total = 1
-        for p, l in zip(preds, label_ids): 
-            matches += torch.sum(torch.argmax(p, dim=-1) == l)
-            total += torch.sum(l != -100)
+
+        matches += torch.sum(torch.argmax(preds, dim=-1) == label_ids)
+        total += torch.sum(label_ids != -100)
 
         if self.metrics is None: 
             self.metrics = {
