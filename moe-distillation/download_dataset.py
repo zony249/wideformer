@@ -32,7 +32,7 @@ elif args.name == "pileval":
     valset.save_to_disk("pileval_local/validation")
 
 elif args.name == "hellaswag": 
-    valset = load_dataset("hellaswag", split="validation")
+    valset = load_dataset("hellaswag", split="validation[:10%]")
     testset = load_dataset("hellaswag", split="test")
     trainset = load_dataset("hellaswag", split="train")
 

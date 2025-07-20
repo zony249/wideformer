@@ -54,6 +54,8 @@ class Hellaswag(AbstractTask):
             assert local_dir is not None, f"load_from_disk is set to {load_local}, however local_dir is None." 
             dataset = load_from_disk(os.path.join(local_dir, split))
         else: 
+            if split == "validation": 
+                split = "validation[:10%]"
             dataset = load_dataset(name, split=split)
         dataset = process_docs(dataset)
         return dataset
