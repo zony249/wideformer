@@ -34,6 +34,7 @@ if __name__ == "__main__":
     parser.add_argument("--epochs", type=int, default=1)
     parser.add_argument("--batch_size", type=int, default=8)
     parser.add_argument("--lr", type=float, default=2e-5)
+    parser.add_argument("--warmup_steps", type=int, default=500)
     parser.add_argument("--gradient_accumulation_steps", type=int, default=1)
     parser.add_argument("--force_load_local_dataset", action="store_true")
     parser.add_argument("--local_dataset_dir", type=str, default=None)
@@ -44,7 +45,7 @@ if __name__ == "__main__":
 
     model, tok = load_model(args.base_model, torch_dtype=torch.bfloat16)
 
-    datasets, formatting_func = get_dataset_and_task_processor(args.task, 
+    datasets, compute_metrics = get_dataset_and_task_processor(args.task, 
                                                                tok=tok, 
                                                                val_test_only=False, 
                                                                load_from_disk=args.force_load_local_dataset, 
@@ -84,17 +85,20 @@ if __name__ == "__main__":
         per_device_eval_batch_size=args.batch_size, 
         learning_rate=args.lr, 
         eval_strategy="steps", 
+        warmup_steps=args.warmup_steps, 
         eval_steps=args.eval_every_steps, 
         save_steps=args.eval_every_steps, 
         gradient_accumulation_steps=args.gradient_accumulation_steps, 
         save_strategy="best", 
-        metric_for_best_model="eval_loss")
+        metric_for_best_model="mean_token_accuracy", 
+        batch_eval_metrics=True)
 
 
     trainer = SFTTrainer(model=model, 
                          processing_class=tok,
                          args=trainer_cfg, 
                          train_dataset=trainset,
-                         eval_dataset=eval_set,  )
+                         eval_dataset=eval_set,  
+                         compute_metrics=compute_metrics)
                         #  formatting_func=formatting_func)
     trainer.train()
