@@ -6,6 +6,7 @@ from abc import ABC, abstractmethod
 
 import torch 
 from torch.utils.data import Dataset
+from transformers import EvalPrediction
 from datasets import load_dataset 
 
 class AbstractTask: 
@@ -16,8 +17,5 @@ class AbstractTask:
     def get_datasets(self, **dataset_kwargs): 
         raise NotImplementedError 
     @abstractmethod
-    def pre_process_fn(self, example: Dict) -> Any:
-        """
-        DEPRECATED
-        """
+    def compute_metrics(self, eval_prediction: EvalPrediction, compute_result: bool) -> Any:
         raise NotImplementedError

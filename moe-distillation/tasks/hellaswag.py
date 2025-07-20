@@ -4,6 +4,7 @@ from typing import Tuple, List, Union, Dict, Any, Optional
 import re
 
 import datasets
+import torch
 from torch.utils.data import Dataset
 from datasets import load_dataset, load_from_disk
 
@@ -18,6 +19,7 @@ class Hellaswag(AbstractTask):
         super().__init__(split=split, 
                          load_local=load_local, 
                          local_dir=local_dir)
+        self.metrics = None
 
     def get_datasets(self, **dataset_kwargs) -> Dict[str, Dataset]: 
         """
@@ -73,8 +75,37 @@ class Hellaswag(AbstractTask):
             question = f"TEST TEXT: {examples['ctx_a']} {examples['ctx_b'].capitalize()}" + examples["endings"][int(examples["label"])]
             return question
         
-    def compute_metrics(self, eval_predictions): 
+    def compute_metrics(self, eval_prediction, compute_result): 
         pass
+        preds = eval_prediction[0] 
+        label_ids = eval_prediction[1]
+
+        preds = preds[..., :-1, :].contiguous()
+        label_ids = label_ids[..., 1:].contiguous()
+
+
+        assert len(preds) == len(label_ids) 
+
+        matches = 0 
+        total = 1
+
+        matches += torch.sum(torch.argmax(preds, dim=-1) == label_ids)
+        total += torch.sum(label_ids != -100)
+
+        if self.metrics is None: 
+            self.metrics = {
+                "matches": matches, 
+                "total": total
+            }
+        else: 
+            self.metrics["matches"] += matches 
+            self.metrics["total"] += total 
+
+        if compute_result: 
+            output =  {"mean_token_accuracy": self.metrics["matches"] / self.metrics["total"]}
+            self.metrics = None 
+            return output
+        return {"mean_token_accuracy": matches / total}
 
 
 # This is from LM_Eval: 
