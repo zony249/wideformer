@@ -88,7 +88,7 @@ if __name__ == "__main__":
         peft_config = LoraConfig(
             task_type=TaskType.CAUSAL_LM, 
             inference_mode=False, 
-            r=32, 
+            r=128, 
             lora_alpha=32, 
             lora_dropout=0.1, 
             target_modules = "all-linear"
