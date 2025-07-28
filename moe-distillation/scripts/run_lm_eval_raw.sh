@@ -15,8 +15,8 @@ export HEAD_NODE=$(hostname) # store head node's address
 export HEAD_NODE_PORT=34568 # choose a port on the main node to start accelerate's main process
 
 # export HF_DATASETS_OFFLINE=1
-export HF_HOME=~/large-file-storage
-export CUDA_VISIBLE_DEVICES=7
+# export HF_HOME=~/large-file-storage
+export CUDA_VISIBLE_DEVICES=2,3,4,5,6,7
 export NCCL_P2P_DISABLE=1
 export NUM_PROCESSES=$(echo $CUDA_VISIBLE_DEVICES | tr ',' '\n' | wc -l)
 
@@ -24,8 +24,10 @@ accelerate launch \
     --num_processes=$NUM_PROCESSES \
     -m lm_eval \
         --model hf \
-        --model_args pretrained="runs/q3-0.6b-coqa--forward",parallelize=False,dtype=bfloat16,trust_remote_code=true \
-        --tasks=coqa\
-        --batch_size 2 \
+        --model_args pretrained="runs/transfers/q3-8b-hellaswag-reverse-distill",parallelize=False,dtype=bfloat16,trust_remote_code=true \
+        --tasks=hellaswag \
+        --num_fewshot=0 \
+        --gen_kwargs num_beams=1 \
+        --batch_size 30 \
         --output_path runs/lm_eval \
         # --log_samples \
